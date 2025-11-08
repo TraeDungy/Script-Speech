@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ExportQueuePanel } from "@/components/ExportQueuePanel";
 
 const prompts = [
   "Outline the cold open with a single location",
@@ -95,6 +96,7 @@ export default function StudioPage() {
               ))}
             </ul>
           </div>
+          <ExportQueuePanel />
         </aside>
       </section>
     </main>
