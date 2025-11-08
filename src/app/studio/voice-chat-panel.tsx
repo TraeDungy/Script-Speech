@@ -43,6 +43,7 @@ function extractTextFromContent(content: unknown): string {
     }
 
     if (typeof value === "string") {
+      fragments.push(value);
       return;
     }
 
@@ -87,15 +88,26 @@ export function VoiceChatPanel() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setPrefersReducedMotion(mediaQuery.matches);
 
     update();
-    mediaQuery.addEventListener("change", update);
 
-    return () => {
-      mediaQuery.removeEventListener("change", update);
-    };
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", update);
+      return () => mediaQuery.removeEventListener("change", update);
+    }
+
+    if (typeof mediaQuery.addListener === "function") {
+      mediaQuery.addListener(update);
+      return () => mediaQuery.removeListener(update);
+    }
+
+    return;
   }, []);
 
   const processPayload = useCallback(
