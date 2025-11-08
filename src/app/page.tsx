@@ -4,19 +4,32 @@ import { AccessRequestForm } from "@/components/AccessRequestForm";
 import { AnimatedHeadline } from "@/components/AnimatedHeadline";
 import { fetchFaqContent, fetchLandingContent } from "@/lib/http";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 export default async function HomePage() {
-  const [landing, faq] = await Promise.all([fetchLandingContent(), fetchFaqContent()]);
+  const [landingResult, faqResult] = await Promise.all([fetchLandingContent(), fetchFaqContent()]);
+  const landing = landingResult.data;
+  const faq = faqResult.data;
 
-  const footnotes = faq.coreFeatures.map((feature, index) => ({
+  const features = faq.coreFeatures ?? [];
+  const footnotes = features.map((feature, index) => ({
     number: index + 1,
     title: feature.title,
     href: `/faq#${feature.slug}`,
   }));
+  const heroFootnote = footnotes[2];
+  const showFallbackNotice = landingResult.source === "fallback" || faqResult.source === "fallback";
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-24 px-6 py-16 md:px-10">
+      {showFallbackNotice ? (
+        <div
+          role="status"
+          className="rounded-3xl border border-amber-400/30 bg-amber-500/10 px-6 py-4 text-sm text-amber-100"
+        >
+          We’re sharing a saved snapshot of our marketing content while the live service is unavailable.
+        </div>
+      ) : null}
       <header className="grain-overlay relative overflow-hidden rounded-[3rem] border border-white/10 bg-vs-panel px-10 py-16 shadow-glow backdrop-blur-2xl md:px-16 md:py-24">
         <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.08),_transparent_55%)]" />
         <div className="flex flex-col gap-8">
@@ -61,7 +74,7 @@ export default async function HomePage() {
           <p className="text-pretty text-base text-zinc-300/90 md:text-lg">
             Direct the session with voice and keep typing in reach for surgical edits. The interface is monochrome on purpose—your story, waveforms, and references are the only elements in motion. Scene boards and exports remain tucked away until you summon them
             <sup className="ml-1 text-sm align-super text-zinc-400">
-              <Link href={footnotes[2].href}>{footnotes[2].number}</Link>
+              <Link href={heroFootnote?.href ?? "#"}>{heroFootnote?.number ?? "—"}</Link>
             </sup>
             .
           </p>
@@ -70,38 +83,65 @@ export default async function HomePage() {
           </p>
         </div>
         <div className="grid gap-6">
-          {landing.vignettes.map((item) => (
-            <div
-              key={item.title}
-              className="group rounded-3xl border border-white/10 bg-white/5 p-6 transition-all duration-300 hover:border-white/30 hover:bg-white/10"
-            >
-              <div className="flex items-start justify-between">
-                <p className="text-lg font-semibold text-white">{item.title}</p>
-                <Link href={footnotes[item.footnote - 1].href} className="text-sm text-zinc-400 transition-colors group-hover:text-white">
-                  {item.footnote}
-                </Link>
-              </div>
-              <p className="mt-3 text-sm text-zinc-400 md:text-base">{item.description}</p>
-            </div>
-          ))}
+          {landing.vignettes?.length
+            ? landing.vignettes.map((item) => (
+                <div
+                  key={item.title}
+                  className="group rounded-3xl border border-white/10 bg-white/5 p-6 transition-all duration-300 hover:border-white/30 hover:bg-white/10"
+                >
+                  <div className="flex items-start justify-between">
+                    <p className="text-lg font-semibold text-white">{item.title}</p>
+                    <Link
+                      href={footnotes[item.footnote - 1]?.href ?? "#"}
+                      className="text-sm text-zinc-400 transition-colors group-hover:text-white"
+                    >
+                      {item.footnote}
+                    </Link>
+                  </div>
+                  <p className="mt-3 text-sm text-zinc-400 md:text-base">{item.description}</p>
+                </div>
+              ))
+            : Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={`vignette-skeleton-${index}`}
+                  className="rounded-3xl border border-white/10 bg-white/5 p-6"
+                >
+                  <div className="h-5 w-1/2 animate-pulse rounded bg-white/10" />
+                  <div className="mt-4 h-20 animate-pulse rounded bg-white/5" />
+                </div>
+              ))}
         </div>
       </section>
 
       <section className="space-y-10">
         <h2 className="text-balance text-3xl font-semibold text-white md:text-4xl">How a session flows once you log in</h2>
         <div className="grid gap-6 md:grid-cols-3">
-          {landing.cadence.map((step) => (
-            <div
-              key={step.heading}
-              className="rounded-3xl border border-white/10 bg-white/5 p-6 transition-transform duration-300 hover:-translate-y-1"
-            >
-              <p className="text-sm uppercase tracking-[0.3em] text-zinc-400">{step.heading}</p>
-              <p className="mt-4 text-pretty text-base text-zinc-300/90">{step.body}</p>
-              <Link href={footnotes[step.anchor - 1].href} className="mt-6 inline-flex text-sm text-zinc-400 hover:text-white">
-                Learn more ↗
-              </Link>
-            </div>
-          ))}
+          {landing.cadence?.length
+            ? landing.cadence.map((step) => (
+                <div
+                  key={step.heading}
+                  className="rounded-3xl border border-white/10 bg-white/5 p-6 transition-transform duration-300 hover:-translate-y-1"
+                >
+                  <p className="text-sm uppercase tracking-[0.3em] text-zinc-400">{step.heading}</p>
+                  <p className="mt-4 text-pretty text-base text-zinc-300/90">{step.body}</p>
+                  <Link
+                    href={footnotes[step.anchor - 1]?.href ?? "#"}
+                    className="mt-6 inline-flex text-sm text-zinc-400 hover:text-white"
+                  >
+                    Learn more ↗
+                  </Link>
+                </div>
+              ))
+            : Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={`cadence-skeleton-${index}`}
+                  className="rounded-3xl border border-white/10 bg-white/5 p-6"
+                >
+                  <div className="h-3 w-1/3 animate-pulse rounded bg-white/10" />
+                  <div className="mt-4 h-16 animate-pulse rounded bg-white/5" />
+                  <div className="mt-6 h-4 w-20 animate-pulse rounded bg-white/10" />
+                </div>
+              ))}
         </div>
       </section>
 
@@ -136,16 +176,22 @@ export default async function HomePage() {
             View the FAQ dossier
           </Link>
         </div>
-        <ol className="grid gap-3 md:grid-cols-2">
-          {footnotes.map((note) => (
-            <li key={note.number} className="flex items-baseline gap-3 rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <span className="text-xs font-semibold text-white/70">[{note.number}]</span>
-              <Link href={note.href} className="text-sm text-zinc-300 hover:text-white">
-                {note.title}
-              </Link>
-            </li>
-          ))}
-        </ol>
+        {footnotes.length ? (
+          <ol className="grid gap-3 md:grid-cols-2">
+            {footnotes.map((note) => (
+              <li key={note.number} className="flex items-baseline gap-3 rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
+                <span className="text-xs font-semibold text-white/70">[{note.number}]</span>
+                <Link href={note.href} className="text-sm text-zinc-300 hover:text-white">
+                  {note.title}
+                </Link>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6">
+            <p className="text-sm text-zinc-400">Footnotes are temporarily unavailable. Please check back soon.</p>
+          </div>
+        )}
       </footer>
     </main>
   );
