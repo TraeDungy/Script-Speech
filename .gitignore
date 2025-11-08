@@ -8,3 +8,6 @@ pnpm-debug.log*
 .env*
 .DS_Store
 .vscode
+
+.data
+tsconfig.tsbuildinfo
