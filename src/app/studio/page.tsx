@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ExportQueuePanel } from "@/components/ExportQueuePanel";
 
 import { VoiceChatPanel } from "./voice-chat-panel";
 
@@ -69,6 +70,7 @@ export default function StudioPage() {
               ))}
             </ul>
           </div>
+          <ExportQueuePanel />
         </aside>
       </section>
     </main>
