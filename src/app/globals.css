@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-vs-background text-white antialiased;
+  background-image: radial-gradient(circle at top left, rgba(56, 189, 248, 0.15), transparent 55%),
+    radial-gradient(circle at bottom right, rgba(129, 140, 248, 0.2), transparent 45%);
+  min-height: 100vh;
+}
+
+a {
+  @apply text-vs-accent transition-colors hover:text-vs-accent-strong;
+}
