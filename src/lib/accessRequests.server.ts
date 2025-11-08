@@ -2,6 +2,14 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL = process.env.SUPABASE_URL?.trim();
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+const SUPABASE_GENERIC_KEY = process.env.SUPABASE_KEY?.trim();
+const SUPABASE_ACCESS_REQUESTS_TABLE =
+  process.env.SUPABASE_ACCESS_REQUESTS_TABLE?.trim() ?? "access_requests";
+
 type NullableString = string | null | undefined;
 
 export type AccessRequestMetadata = {
@@ -48,6 +56,12 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
 const STORE_PATH =
   process.env.ACCESS_REQUEST_STORE_PATH ??
   path.join(process.cwd(), ".data", "access-requests.json");
+
+type AccessRequestPersistence = {
+  create(record: AccessRequestRecord): Promise<void>;
+  list(): Promise<AccessRequestRecord[]>;
+  hasRecentSubmission(email: string, windowStart: Date): Promise<boolean>;
+};
 
 function getRateLimitMinutes(): number {
   const value = Number(process.env.ACCESS_REQUEST_RATE_LIMIT_MINUTES);
@@ -140,6 +154,144 @@ function sanitizeClientContext(
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+const filePersistence: AccessRequestPersistence = {
+  async create(record) {
+    const existing = await readStore();
+    await writeStore([...existing, record]);
+  },
+  async list() {
+    const records = await readStore();
+    return records.sort(
+      (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime(),
+    );
+  },
+  async hasRecentSubmission(email, windowStart) {
+    const existingRequests = await readStore();
+    return existingRequests.some((request) => {
+      if (request.email !== email) {
+        return false;
+      }
+
+      const submittedAt = new Date(request.submittedAt);
+      return submittedAt > windowStart;
+    });
+  },
+};
+
+type SupabaseAccessRequestRow = {
+  id: string;
+  email: string;
+  message: string | null;
+  metadata: AccessRequestMetadata | null;
+  client: AccessRequestClientContext | null;
+  submitted_at: string;
+};
+
+let cachedSupabaseClient: SupabaseClient | null = null;
+
+function resolveSupabaseKey(): string | undefined {
+  return SUPABASE_SERVICE_ROLE_KEY || SUPABASE_GENERIC_KEY;
+}
+
+function getSupabaseClient(): SupabaseClient | null {
+  const key = resolveSupabaseKey();
+  if (!SUPABASE_URL || !key) {
+    return null;
+  }
+
+  if (!cachedSupabaseClient) {
+    cachedSupabaseClient = createClient(SUPABASE_URL, key, {
+      auth: {
+        persistSession: false,
+      },
+    });
+  }
+
+  return cachedSupabaseClient;
+}
+
+function assertSupabaseConfigured(): SupabaseClient {
+  const client = getSupabaseClient();
+  if (!client) {
+    throw new AccessRequestError("Supabase is not configured.", 500);
+  }
+  return client;
+}
+
+const supabasePersistence: AccessRequestPersistence = {
+  async create(record) {
+    const client = assertSupabaseConfigured();
+    const { error } = await client.from(SUPABASE_ACCESS_REQUESTS_TABLE).insert({
+      id: record.id,
+      email: record.email,
+      message: record.message ?? null,
+      metadata: record.metadata ?? null,
+      client: record.client ?? null,
+      submitted_at: record.submittedAt,
+    });
+
+    if (error) {
+      throw new AccessRequestError(
+        error.message ?? "Failed to persist access request to Supabase.",
+        error.status ?? 500,
+      );
+    }
+  },
+  async list() {
+    const client = assertSupabaseConfigured();
+    const { data, error } = await client
+      .from(SUPABASE_ACCESS_REQUESTS_TABLE)
+      .select("*")
+      .order("submitted_at", { ascending: false });
+
+    if (error) {
+      throw new AccessRequestError(
+        error.message ?? "Failed to list access requests from Supabase.",
+        error.status ?? 500,
+      );
+    }
+
+    return (data ?? []).map(transformSupabaseRow);
+  },
+  async hasRecentSubmission(email, windowStart) {
+    const client = assertSupabaseConfigured();
+    const { data, error } = await client
+      .from(SUPABASE_ACCESS_REQUESTS_TABLE)
+      .select("id")
+      .eq("email", email)
+      .gte("submitted_at", windowStart.toISOString())
+      .limit(1);
+
+    if (error) {
+      throw new AccessRequestError(
+        error.message ?? "Failed to query access requests from Supabase.",
+        error.status ?? 500,
+      );
+    }
+
+    return Array.isArray(data) && data.length > 0;
+  },
+};
+
+function transformSupabaseRow(row: SupabaseAccessRequestRow): AccessRequestRecord {
+  return {
+    id: row.id,
+    email: row.email,
+    message: row.message ?? undefined,
+    metadata: row.metadata ?? undefined,
+    client: row.client ?? undefined,
+    submittedAt: row.submitted_at,
+  };
+}
+
+function getPersistence(): AccessRequestPersistence {
+  if (SUPABASE_URL && resolveSupabaseKey()) {
+    return supabasePersistence;
+  }
+
+  return filePersistence;
+}
+
 export async function createAccessRequest({
   email,
   message,
@@ -151,19 +303,16 @@ export async function createAccessRequest({
   const normalizedMetadata = sanitizeMetadata(metadata);
   const normalizedClient = sanitizeClientContext(client);
 
-  const existingRequests = await readStore();
   const now = new Date();
   const rateLimitMinutes = getRateLimitMinutes();
   const windowStart = new Date(now.getTime() - rateLimitMinutes * 60 * 1000);
 
-  const hasRecentSubmission = existingRequests.some((request) => {
-    if (request.email !== normalizedEmail) {
-      return false;
-    }
+  const persistence = getPersistence();
 
-    const submittedAt = new Date(request.submittedAt);
-    return submittedAt > windowStart;
-  });
+  const hasRecentSubmission = await persistence.hasRecentSubmission(
+    normalizedEmail,
+    windowStart,
+  );
 
   if (hasRecentSubmission) {
     throw new AccessRequestError(
@@ -181,12 +330,12 @@ export async function createAccessRequest({
     submittedAt: now.toISOString(),
   };
 
-  await writeStore([...existingRequests, record]);
+  await persistence.create(record);
 
   return record;
 }
 
 export async function listAccessRequests(): Promise<AccessRequestRecord[]> {
-  const records = await readStore();
-  return records.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  const persistence = getPersistence();
+  return persistence.list();
 }
