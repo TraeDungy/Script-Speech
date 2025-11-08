@@ -9,17 +9,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        "vs-background": "#020617",
-        "vs-panel": "rgba(15, 23, 42, 0.6)",
-        "vs-accent": "#38bdf8",
-        "vs-accent-strong": "#818cf8"
+        "vs-background": "#050505",
+        "vs-panel": "rgba(24, 24, 27, 0.85)",
+        "vs-accent": "#f5f5f5",
+        "vs-accent-strong": "#d4d4d8"
       },
       backdropBlur: {
         xs: "2px"
       },
       boxShadow: {
-        glass: "0 20px 45px -25px rgba(56, 189, 248, 0.45)",
-        glow: "0 0 50px rgba(129, 140, 248, 0.35)"
+        glass: "0 24px 60px -30px rgba(250, 250, 250, 0.12)",
+        glow: "0 0 60px rgba(212, 212, 216, 0.2)"
       }
     }
   },
