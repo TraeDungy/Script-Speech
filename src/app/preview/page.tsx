@@ -9,13 +9,23 @@ const previewPhrases = [
   "Footnote-led feature dossier",
 ];
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 export default async function PreviewPage() {
-  const faq = await fetchFaqContent();
+  const faqResult = await fetchFaqContent();
+  const faq = faqResult.data;
+  const showFallbackNotice = faqResult.source === "fallback";
 
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-16 px-6 py-16 md:px-10">
+      {showFallbackNotice ? (
+        <div
+          role="status"
+          className="rounded-3xl border border-amber-400/30 bg-amber-500/10 px-6 py-4 text-sm text-amber-100"
+        >
+          We’re showing cached highlights while the live preview content reloads.
+        </div>
+      ) : null}
       <header className="space-y-8">
         <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Preview</p>
         <div className="space-y-6">
@@ -41,13 +51,27 @@ export default async function PreviewPage() {
       </header>
 
       <section className="grid gap-6 md:grid-cols-2">
-        {faq.coreFeatures.slice(0, 4).map((feature, index) => (
-          <div key={feature.slug} className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-glass backdrop-blur transition hover:border-white/25 hover:bg-white/10">
-            <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Feature {index + 1}</p>
-            <h2 className="mt-3 text-lg font-semibold text-white">{feature.title}</h2>
-            <p className="mt-3 text-sm text-zinc-300">{feature.description}</p>
-          </div>
-        ))}
+        {faq.coreFeatures?.length
+          ? faq.coreFeatures.slice(0, 4).map((feature, index) => (
+              <div
+                key={feature.slug}
+                className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-glass backdrop-blur transition hover:border-white/25 hover:bg-white/10"
+              >
+                <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Feature {index + 1}</p>
+                <h2 className="mt-3 text-lg font-semibold text-white">{feature.title}</h2>
+                <p className="mt-3 text-sm text-zinc-300">{feature.description}</p>
+              </div>
+            ))
+          : Array.from({ length: 4 }).map((_, index) => (
+              <div
+                key={`preview-feature-skeleton-${index}`}
+                className="rounded-3xl border border-white/10 bg-white/5 p-6"
+              >
+                <div className="h-3 w-1/3 animate-pulse rounded bg-white/10" />
+                <div className="mt-4 h-5 w-2/3 animate-pulse rounded bg-white/10" />
+                <div className="mt-4 h-16 animate-pulse rounded bg-white/5" />
+              </div>
+            ))}
       </section>
 
       <section className="grid gap-6 md:grid-cols-2">
