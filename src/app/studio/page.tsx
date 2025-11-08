@@ -1,24 +1,11 @@
 import Link from "next/link";
 
+import { VoiceChatPanel } from "./voice-chat-panel";
+
 const prompts = [
   "Outline the cold open with a single location",
   "Drop in references for lighting and costume",
   "Preview export package"
-];
-
-const transcript = [
-  {
-    role: "Director",
-    content: "Let's reframe the second beat so the reveal happens off screen.",
-  },
-  {
-    role: "Script Speech",
-    content: "Copy. Updating beat two with off-screen reveal and adjusting dialogue pacing to create anticipation.",
-  },
-  {
-    role: "Director",
-    content: "Tag the location with the exterior reference board and prep export for review.",
-  },
 ];
 
 export default function StudioPage() {
@@ -71,20 +58,7 @@ export default function StudioPage() {
           </div>
         </div>
         <aside className="space-y-6">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur">
-            <div className="flex items-center justify-between text-xs uppercase tracking-[0.35em] text-zinc-500">
-              <span>Voice chat</span>
-              <span>Live</span>
-            </div>
-            <ul className="mt-6 space-y-5">
-              {transcript.map((message) => (
-                <li key={message.content} className="space-y-2 rounded-2xl border border-white/10 bg-vs-panel p-4 transition-transform duration-300 hover:-translate-y-0.5">
-                  <p className="text-xs uppercase tracking-[0.25em] text-zinc-500">{message.role}</p>
-                  <p className="text-sm text-zinc-300">{message.content}</p>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <VoiceChatPanel />
           <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur">
             <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Quick prompts</p>
             <ul className="mt-4 space-y-3">
