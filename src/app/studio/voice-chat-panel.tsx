@@ -43,6 +43,10 @@ function extractTextFromContent(content: unknown): string {
     }
 
     if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        fragments.push(trimmed);
+      }
       return;
     }
 
@@ -201,6 +205,20 @@ export function VoiceChatPanel() {
         if (text) {
           updateMessage(response?.id as string | undefined, response?.role as string | undefined, text, true, false);
         }
+        return;
+      }
+
+      if (type === "response.output_text.delta") {
+        const text = extractTextFromContent(data.delta ?? data.text ?? data);
+        if (text) {
+          updateMessage(data.response_id as string | undefined, data.role as string | undefined, text, false, true);
+        }
+        return;
+      }
+
+      if (type === "response.output_text.done") {
+        updateMessage(data.response_id as string | undefined, data.role as string | undefined, undefined, true, false);
+        return;
       }
     },
     [setMessages],
