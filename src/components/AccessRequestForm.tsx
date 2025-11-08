@@ -2,24 +2,56 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 
-const initialState = {
+type FormState = {
+  email: string;
+  message: string;
+  company: string;
+  projectTitle: string;
+  projectTimeline: string;
+  projectNotes: string;
+};
+
+const initialState: FormState = {
   email: "",
   message: "",
+  company: "",
+  projectTitle: "",
+  projectTimeline: "",
+  projectNotes: "",
+};
+
+type Status = "idle" | "success" | "error";
+
+type Feedback = {
+  status: Status;
+  message: string | null;
 };
 
 export function AccessRequestForm() {
   const [formState, setFormState] = useState(initialState);
-  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<Feedback>({ status: "idle", message: null });
+  const [showProjectDetails, setShowProjectDetails] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  function resetFeedback() {
+    setFeedback({ status: "idle", message: null });
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setStatus("idle");
-    setErrorMessage(null);
+    resetFeedback();
 
     startTransition(async () => {
       try {
+        const metadata = showProjectDetails
+          ? {
+              company: formState.company.trim() || undefined,
+              projectTitle: formState.projectTitle.trim() || undefined,
+              projectTimeline: formState.projectTimeline.trim() || undefined,
+              projectNotes: formState.projectNotes.trim() || undefined,
+            }
+          : undefined;
+
         const response = await fetch("/api/request-access", {
           method: "POST",
           headers: {
@@ -27,7 +59,8 @@ export function AccessRequestForm() {
           },
           body: JSON.stringify({
             email: formState.email,
-            message: formState.message,
+            message: formState.message || undefined,
+            metadata,
           }),
         });
 
@@ -39,12 +72,14 @@ export function AccessRequestForm() {
         }
 
         setFormState(initialState);
-        setStatus("success");
+        setShowProjectDetails(false);
+        setFeedback({ status: "success", message: payload?.message ?? null });
       } catch (error) {
-        setStatus("error");
-        setErrorMessage(
-          error instanceof Error ? error.message : "Something went wrong. Please try again.",
-        );
+        setFeedback({
+          status: "error",
+          message:
+            error instanceof Error ? error.message : "Something went wrong. Please try again.",
+        });
       }
     });
   }
@@ -81,6 +116,68 @@ export function AccessRequestForm() {
           />
         </label>
       </div>
+      <div className="space-y-4">
+        <button
+          type="button"
+          onClick={() => {
+            setShowProjectDetails((visible) => !visible);
+          }}
+          className="text-left text-xs font-semibold uppercase tracking-[0.3em] text-zinc-400 transition hover:text-white"
+        >
+          {showProjectDetails ? "Hide project details" : "Add project details"}
+        </button>
+        {showProjectDetails && (
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="flex flex-col gap-2">
+              <span className="text-xs uppercase tracking-[0.35em] text-zinc-500">Company</span>
+              <input
+                type="text"
+                value={formState.company}
+                onChange={(event) =>
+                  setFormState((state) => ({ ...state, company: event.target.value }))
+                }
+                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-zinc-500 focus:border-white/40 focus:outline-none focus:ring-0"
+                placeholder="Studio or production company"
+              />
+            </label>
+            <label className="flex flex-col gap-2">
+              <span className="text-xs uppercase tracking-[0.35em] text-zinc-500">Project title</span>
+              <input
+                type="text"
+                value={formState.projectTitle}
+                onChange={(event) =>
+                  setFormState((state) => ({ ...state, projectTitle: event.target.value }))
+                }
+                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-zinc-500 focus:border-white/40 focus:outline-none focus:ring-0"
+                placeholder="Working title"
+              />
+            </label>
+            <label className="flex flex-col gap-2 md:col-span-2">
+              <span className="text-xs uppercase tracking-[0.35em] text-zinc-500">Timeline</span>
+              <input
+                type="text"
+                value={formState.projectTimeline}
+                onChange={(event) =>
+                  setFormState((state) => ({ ...state, projectTimeline: event.target.value }))
+                }
+                className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-zinc-500 focus:border-white/40 focus:outline-none focus:ring-0"
+                placeholder="Prep, shoot, post schedule"
+              />
+            </label>
+            <label className="flex flex-col gap-2 md:col-span-2">
+              <span className="text-xs uppercase tracking-[0.35em] text-zinc-500">Notes</span>
+              <textarea
+                value={formState.projectNotes}
+                onChange={(event) =>
+                  setFormState((state) => ({ ...state, projectNotes: event.target.value }))
+                }
+                className="min-h-[120px] w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-zinc-500 focus:border-white/40 focus:outline-none focus:ring-0"
+                placeholder="Share anything else that helps us prep for the walkthrough"
+              />
+            </label>
+          </div>
+        )}
+      </div>
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <p className="text-xs text-zinc-500 md:max-w-sm">
           Share your best contact email and what you are producing next. We will schedule a 15-minute run-through of Script Speech.
@@ -93,13 +190,11 @@ export function AccessRequestForm() {
           {isPending ? "Sending…" : "Request access"}
         </button>
       </div>
-      {status === "success" && (
-        <p className="text-sm text-emerald-400">
-          Request received. We will reach out shortly with onboarding details.
-        </p>
+      {feedback.status === "success" && feedback.message && (
+        <p className="text-sm text-emerald-400">{feedback.message}</p>
       )}
-      {status === "error" && errorMessage && (
-        <p className="text-sm text-rose-400">{errorMessage}</p>
+      {feedback.status === "error" && feedback.message && (
+        <p className="text-sm text-rose-400">{feedback.message}</p>
       )}
     </form>
   );
