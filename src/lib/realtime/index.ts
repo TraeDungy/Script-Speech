@@ -112,6 +112,7 @@ export class RealtimeClient {
         this.remoteAudioStream = stream;
         if (this.remoteAudioElement) {
           this.remoteAudioElement.srcObject = stream;
+          void this.remoteAudioElement.play?.();
         }
       }
     });
@@ -208,6 +209,7 @@ export class RealtimeClient {
 
     if (this.remoteAudioStream) {
       this.remoteAudioElement.srcObject = this.remoteAudioStream;
+      void this.remoteAudioElement.play?.();
     }
   }
 
@@ -266,6 +268,7 @@ export class RealtimeClient {
       headers: {
         "Content-Type": "application/json",
       },
+      cache: "no-store",
     });
 
     if (!response.ok) {
