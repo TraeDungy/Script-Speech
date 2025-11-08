@@ -1,5 +1,6 @@
 export const platformPillars = [
   {
+    slug: "realtime-voice",
     title: "Realtime Voice",
     points: [
       "WebRTC-powered capture with waveform feedback",
@@ -8,6 +9,7 @@ export const platformPillars = [
     ],
   },
   {
+    slug: "script-intelligence",
     title: "Script Intelligence",
     points: [
       "Canonical ScriptDoc JSON keeps every tool aligned",
@@ -16,6 +18,7 @@ export const platformPillars = [
     ],
   },
   {
+    slug: "reference-driven",
     title: "Reference-Driven",
     points: [
       "Upload large media with background processing",

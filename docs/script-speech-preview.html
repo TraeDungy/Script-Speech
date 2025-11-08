@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Script Speech — Experience Preview</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #050505;
+        color: rgba(244, 244, 245, 0.9);
+        min-height: 100vh;
+        padding: 72px 20px 120px;
+        background-image:
+          radial-gradient(140% 120% at 10% 0%, rgba(82, 82, 91, 0.42), transparent 65%),
+          radial-gradient(120% 100% at 90% 10%, rgba(24, 24, 27, 0.75), transparent 70%),
+          linear-gradient(160deg, rgba(9, 9, 11, 0.92), rgba(15, 15, 15, 0.92));
+      }
+
+      main {
+        width: min(1120px, 100%);
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 120px;
+      }
+
+      .hero {
+        position: relative;
+        border-radius: 48px;
+        padding: clamp(48px, 8vw, 96px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: radial-gradient(120% 160% at 0% 0%, rgba(63, 63, 70, 0.3), transparent 65%),
+          linear-gradient(145deg, rgba(24, 24, 27, 0.9), rgba(39, 39, 42, 0.45));
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        box-shadow: 0 50px 120px rgba(0, 0, 0, 0.45);
+        overflow: hidden;
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        inset: -50% -20% auto 45%;
+        height: 180%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(250, 250, 250, 0.08), transparent 65%);
+        transform: rotate(12deg);
+      }
+
+      .hero-tag {
+        display: inline-flex;
+        align-items: center;
+        padding: 10px 22px;
+        font-size: 0.75rem;
+        letter-spacing: 0.35em;
+        text-transform: uppercase;
+        border-radius: 999px;
+        border: 1px solid rgba(228, 228, 231, 0.15);
+        color: rgba(244, 244, 245, 0.7);
+        background: rgba(63, 63, 70, 0.2);
+      }
+
+      h1 {
+        margin: 32px 0 16px;
+        font-size: clamp(2.75rem, 5vw, 4.25rem);
+        letter-spacing: -0.03em;
+        color: #fff;
+      }
+
+      .anim-wrapper {
+        font-size: clamp(1.1rem, 2.6vw, 1.5rem);
+        font-weight: 500;
+        color: rgba(244, 244, 245, 0.75);
+        min-height: 2.25rem;
+      }
+
+      .animated-text {
+        display: inline-block;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .animated-text span {
+        display: block;
+        animation: headline 16s infinite;
+        white-space: nowrap;
+      }
+
+      @keyframes headline {
+        0%, 20% {
+          transform: translateY(0%);
+        }
+        25%, 45% {
+          transform: translateY(-100%);
+        }
+        50%, 70% {
+          transform: translateY(-200%);
+        }
+        75%, 95% {
+          transform: translateY(-300%);
+        }
+        100% {
+          transform: translateY(0%);
+        }
+      }
+
+      .hero p {
+        margin: 28px 0 40px;
+        font-size: clamp(1rem, 2.4vw, 1.2rem);
+        line-height: 1.8;
+        color: rgba(212, 212, 216, 0.78);
+        max-width: 620px;
+      }
+
+      .cta-row {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        align-items: flex-start;
+      }
+
+      @media (min-width: 640px) {
+        .cta-row {
+          flex-direction: row;
+        }
+      }
+
+      .cta {
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 0.95rem;
+        border-radius: 999px;
+        padding: 14px 32px;
+        transition: transform 220ms ease, border-color 220ms ease;
+      }
+
+      .cta.primary {
+        background: rgba(250, 250, 250, 0.92);
+        color: #09090b;
+        border: 1px solid rgba(250, 250, 250, 0.85);
+      }
+
+      .cta.secondary {
+        border: 1px solid rgba(228, 228, 231, 0.25);
+        color: rgba(244, 244, 245, 0.85);
+        background: rgba(63, 63, 70, 0.2);
+      }
+
+      .cta.ghost {
+        border: 1px solid rgba(82, 82, 91, 0.35);
+        color: rgba(228, 228, 231, 0.65);
+        background: rgba(39, 39, 42, 0.2);
+      }
+
+      .cta:hover {
+        transform: translateY(-4px);
+      }
+
+      section {
+        display: flex;
+        flex-direction: column;
+        gap: 36px;
+      }
+
+      h2 {
+        font-size: clamp(2.2rem, 4vw, 3rem);
+        letter-spacing: -0.02em;
+        margin: 0;
+      }
+
+      .section-sub {
+        color: rgba(161, 161, 170, 0.85);
+        font-size: 1rem;
+        line-height: 1.8;
+        margin: 0;
+      }
+
+      .split {
+        display: grid;
+        gap: 40px;
+      }
+
+      @media (min-width: 900px) {
+        .split {
+          grid-template-columns: 1.1fr 0.9fr;
+        }
+      }
+
+      .vignette-card {
+        border-radius: 28px;
+        padding: 28px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(24, 24, 27, 0.55);
+        transition: border-color 200ms ease, transform 200ms ease;
+      }
+
+      .vignette-card:hover {
+        border-color: rgba(250, 250, 250, 0.35);
+        transform: translateY(-6px);
+      }
+
+      .vignette-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 1.05rem;
+        font-weight: 600;
+      }
+
+      .vignette-title a {
+        text-decoration: none;
+        color: rgba(161, 161, 170, 0.7);
+      }
+
+      .vignette-title a:hover {
+        color: #fafafa;
+      }
+
+      .vignette-copy {
+        margin-top: 16px;
+        font-size: 0.95rem;
+        line-height: 1.8;
+        color: rgba(212, 212, 216, 0.75);
+      }
+
+      .cadence-grid {
+        display: grid;
+        gap: 24px;
+      }
+
+      @media (min-width: 900px) {
+        .cadence-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+
+      .cadence-step {
+        border-radius: 28px;
+        padding: 28px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(17, 17, 17, 0.7);
+        transition: transform 220ms ease;
+      }
+
+      .cadence-step:hover {
+        transform: translateY(-8px);
+      }
+
+      .cadence-step p {
+        margin: 0;
+        line-height: 1.7;
+      }
+
+      .step-label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.32em;
+        color: rgba(120, 113, 198, 0.75);
+      }
+
+      .step-body {
+        margin-top: 18px;
+        color: rgba(212, 212, 216, 0.75);
+      }
+
+      .step-link {
+        display: inline-flex;
+        margin-top: 24px;
+        font-size: 0.85rem;
+        text-decoration: none;
+        color: rgba(161, 161, 170, 0.75);
+      }
+
+      .step-link:hover {
+        color: #fafafa;
+      }
+
+      .cta-panel {
+        text-align: center;
+        padding: clamp(48px, 7vw, 72px);
+        border-radius: 44px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: linear-gradient(135deg, rgba(63, 63, 70, 0.35), rgba(24, 24, 27, 0.9));
+        box-shadow: 0 30px 120px rgba(24, 24, 27, 0.5);
+      }
+
+      .cta-panel p {
+        margin: 0;
+        color: rgba(212, 212, 216, 0.75);
+        line-height: 1.7;
+      }
+
+      .cta-panel .eyebrow {
+        border-color: rgba(82, 82, 91, 0.45);
+        background: rgba(63, 63, 70, 0.25);
+        color: rgba(161, 161, 170, 0.9);
+      }
+
+      footer {
+        border-top: 1px solid rgba(39, 39, 42, 0.85);
+        padding-top: 36px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      footer .foot-header {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+        letter-spacing: 0.32em;
+        color: rgba(113, 113, 122, 0.85);
+      }
+
+      @media (min-width: 700px) {
+        footer .foot-header {
+          flex-direction: row;
+          justify-content: space-between;
+          align-items: center;
+        }
+      }
+
+      footer a {
+        text-decoration: none;
+        color: rgba(244, 244, 245, 0.7);
+      }
+
+      footer a:hover {
+        color: #fafafa;
+      }
+
+      .footnotes {
+        display: grid;
+        gap: 14px;
+      }
+
+      @media (min-width: 780px) {
+        .footnotes {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      .footnote-item {
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(24, 24, 27, 0.55);
+        padding: 18px 22px;
+        display: flex;
+        gap: 16px;
+        align-items: baseline;
+      }
+
+      .footnote-index {
+        font-weight: 600;
+        color: rgba(212, 212, 216, 0.6);
+        font-size: 0.85rem;
+      }
+
+      .footnote-title {
+        font-size: 0.95rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <div class="hero-tag">Script Speech</div>
+        <h1>The voice-led story studio for directors who think out loud.</h1>
+        <div class="anim-wrapper">
+          <div class="animated-text" aria-live="polite">
+            <span>
+              Draft cinema-ready stories by speaking<br />
+              Sketch acts, beats, and shots without friction<br />
+              Deliver production files the same day<br />
+              Keep the landing page nothing but signal
+            </span>
+          </div>
+        </div>
+        <p>
+          Script Speech keeps the landing page focused on the mood: low light, confident lines, and zero clutter.
+          Speak your vision and the canvas adapts without compromising precision.
+        </p>
+        <div class="cta-row">
+          <a class="cta primary" href="#canvas">Enter the studio</a>
+          <a class="cta secondary" href="#faq">Study the system</a>
+          <a class="cta ghost" href="#preview">Share the preview</a>
+        </div>
+      </header>
+
+      <section class="split" id="canvas">
+        <article>
+          <h2>A stripped-back control room where every surface listens.</h2>
+          <p class="section-sub">
+            Direct the session with voice and keep typing in reach for surgical edits. The interface is monochrome on
+            purpose—your story, waveforms, and references are the only elements in motion. Scene boards and exports remain
+            tucked away until you summon them<sup>3</sup>.
+          </p>
+          <p class="section-sub">
+            The landing page is nothing but welcome and invitation. Production controls live beyond the fold so prospects
+            catch the vibe first and dive into details later.
+          </p>
+        </article>
+        <aside class="vignette-grid">
+          <div class="vignette-card">
+            <div class="vignette-title">
+              <span>Voice directs the room</span>
+              <a href="#faq-1">1</a>
+            </div>
+            <p class="vignette-copy">
+              Speak the brief, calibrate tone, and watch the story spine assemble itself. Text is always there when you
+              need to fine-tune.
+            </p>
+          </div>
+          <div class="vignette-card">
+            <div class="vignette-title">
+              <span>Canvas stays in sync</span>
+              <a href="#faq-2">2</a>
+            </div>
+            <p class="vignette-copy">
+              Outline, beat grid, and script view are rendered from one ScriptDoc core so every revision lands everywhere
+              at once.
+            </p>
+          </div>
+          <div class="vignette-card">
+            <div class="vignette-title">
+              <span>References travel with you</span>
+              <a href="#faq-3">3</a>
+            </div>
+            <p class="vignette-copy">
+              Boards, clips, and research snippets follow each scene and export with your package. Nothing gets stranded in
+              a drive.
+            </p>
+          </div>
+        </aside>
+      </section>
+
+      <section id="preview">
+        <h2>How a session flows once you log in</h2>
+        <div class="cadence-grid">
+          <div class="cadence-step">
+            <p class="step-label">1. Tune the signal</p>
+            <p class="step-body">
+              A minimalist intake checks format, pacing, and references while your waveform shows the room is listening.
+            </p>
+            <a class="step-link" href="#faq-1">Learn more ↗</a>
+          </div>
+          <div class="cadence-step">
+            <p class="step-label">2. Move the pieces</p>
+            <p class="step-body">
+              Outline and beat editors adapt instantly to voice or keyboard adjustments so structure never lags behind.
+            </p>
+            <a class="step-link" href="#faq-2">Learn more ↗</a>
+          </div>
+          <div class="cadence-step">
+            <p class="step-label">3. Deliver with certainty</p>
+            <p class="step-body">
+              Queue exports, share secure links, and walk into your next session with production-ready files in hand.
+            </p>
+            <a class="step-link" href="#faq-4">Learn more ↗</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta-panel">
+        <div class="hero-tag">Early collaborator program</div>
+        <h2>Help us tune Script Speech for productions that move fast.</h2>
+        <p>
+          Founding teams receive guided onboarding, access to the redesigned studio canvas, and direct lines to the crew
+          building the experience.
+        </p>
+        <div class="cta-row" style="justify-content: center; margin-top: 32px">
+          <a class="cta primary" href="#canvas">Preview the canvas</a>
+          <a class="cta secondary" href="mailto:hello@scriptspeech.com">Request access</a>
+        </div>
+      </section>
+
+      <footer id="faq">
+        <div class="foot-header">
+          <span>Feature footnotes</span>
+          <a href="https://example.com/faq">View the FAQ dossier</a>
+        </div>
+        <div class="footnotes">
+          <div class="footnote-item" id="faq-1">
+            <span class="footnote-index">[1]</span>
+            <span class="footnote-title">Voice-directed storyboarding engine</span>
+          </div>
+          <div class="footnote-item" id="faq-2">
+            <span class="footnote-index">[2]</span>
+            <span class="footnote-title">Canvas-wide ScriptDoc sync</span>
+          </div>
+          <div class="footnote-item" id="faq-3">
+            <span class="footnote-index">[3]</span>
+            <span class="footnote-title">Reference locker that travels</span>
+          </div>
+          <div class="footnote-item" id="faq-4">
+            <span class="footnote-index">[4]</span>
+            <span class="footnote-title">Export control room with instant delivery</span>
+          </div>
+        </div>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Voice Script Studio",
+  title: "Script Speech",
   description:
-    "A voice-first scriptwriting environment for storytellers combining conversational capture with multimodal references.",
+    "Script Speech is a voice-forward story studio with a reimagined canvas for writers and directors to think out loud.",
 };
 
 export default function RootLayout({

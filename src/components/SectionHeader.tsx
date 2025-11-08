@@ -14,11 +14,11 @@ export function SectionHeader({ eyebrow, title, description, alignment = "center
   return (
     <div className={`mx-auto flex max-w-4xl flex-col gap-4 ${alignmentClassnames[alignment]}`}>
       {eyebrow ? (
-        <span className="text-xs font-semibold uppercase tracking-[0.3em] text-vs-accent">{eyebrow}</span>
+        <span className="text-xs font-semibold uppercase tracking-[0.3em] text-vs-accent-strong">{eyebrow}</span>
       ) : null}
       <h2 className="text-balance text-3xl font-semibold text-white md:text-5xl">{title}</h2>
       {description ? (
-        <p className="text-pretty text-base text-slate-300/85 md:text-lg">{description}</p>
+        <p className="text-pretty text-base text-zinc-300/85 md:text-lg">{description}</p>
       ) : null}
     </div>
   );
