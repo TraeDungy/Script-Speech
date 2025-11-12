@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 
-import { getMockScriptDoc } from "@/lib/db/mocks";
+import { mockScriptDoc } from "./mockScriptDoc";
 
 import {
   ScriptDoc,
@@ -55,7 +55,7 @@ const randomId = () =>
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2, 10));
 
-const fallbackDoc = getMockScriptDoc();
+const fallbackDoc = mockScriptDoc;
 const initialDoc: ScriptDoc = structuredCloneDoc(fallbackDoc);
 const ensureOrder = (doc: ScriptDoc) => {
   applyOrder(doc.beats);
