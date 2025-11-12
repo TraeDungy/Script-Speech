@@ -477,15 +477,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "transcript.append") {
-      return handleTranscriptAppend(data, user.id);
+      return await handleTranscriptAppend(data, user.id);
     }
 
     if (action === "transcript.fetch") {
-      return handleTranscriptFetch(data, user.id);
+      return await handleTranscriptFetch(data, user.id);
     }
 
     if (action === "tool.invoke") {
-      return dispatchToolInvocation(data, user.id);
+      return await dispatchToolInvocation(data, user.id);
     }
 
     if (action === "ack.parse") {
