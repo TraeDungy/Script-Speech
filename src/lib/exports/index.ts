@@ -1,30 +1,5 @@
-import { randomUUID } from "node:crypto";
-
-import {
-  createClient,
-  type PostgrestError,
-  type SupabaseClient,
-} from "@supabase/supabase-js";
-
-import type { ExportFormat, ExportJob, ExportJobStatus } from "./types";
-
-export interface ScriptDocDialogue {
-  character: string;
-  text: string;
-  parenthetical?: string;
-}
-
-export interface ScriptDocScene {
-  heading: string;
-  action?: string;
-  dialogue?: ScriptDocDialogue[];
-}
-
-export interface ScriptDoc {
-  title?: string;
-  logline?: string;
-  scenes: ScriptDocScene[];
-}
+import { createExportJobRecord, fetchExportJobRecord, updateExportJobRecord } from "@/lib/db/exportJobs";
+import type { ExportFormat, ExportJob, ScriptDoc } from "./types";
 
 interface EnqueuePayload {
   projectId: string;
@@ -90,381 +65,78 @@ const globalRef = globalThis as typeof globalThis & {
   __scriptSpeechLocalExportQueue?: LocalExportQueue;
 };
 
-export async function enqueueExportJob(payload: EnqueuePayload): Promise<ExportJob> {
-  if (isSupabaseConfigured()) {
-    const job = await createSupabaseExportJob(payload);
-    await triggerExportProcessor(job.id, payload);
+export class ExportQueue {
+  async enqueue(payload: EnqueuePayload): Promise<ExportJob> {
+    const job = await createExportJobRecord(payload);
+
+    setTimeout(() => {
+      this.processJob(job.id, payload).catch((error) => {
+        console.error("Export job failed", error);
+      });
+
     return job;
   }
 
-  const queue = getLocalExportQueue();
-  return queue.enqueue(payload);
-}
-
-export async function getExportJob(jobId: string): Promise<ExportJob | null> {
-  if (isSupabaseConfigured()) {
-    return fetchSupabaseJob(jobId);
+  async getJob(jobId: string): Promise<ExportJob | null> {
+    return fetchExportJobRecord(jobId);
   }
 
-  const queue = getLocalExportQueue();
-  return queue.get(jobId) ?? null;
-}
+  private async processJob(jobId: string, payload: EnqueuePayload) {
+    await updateExportJobRecord(jobId, { status: "processing" });
 
-export async function sendExportDeliveryEmail(job: ExportJob): Promise<void> {
-  const recipient = job.deliverToEmail?.trim();
-  const downloadUrl = job.result?.downloadUrl;
+    try {
+      const result = await this.generateResult(payload);
+      const fileName = `${payload.projectId}-${jobId}.${result.extension}`;
+      const downloadUrl = `data:${result.mime};base64,${Buffer.from(result.content, "utf8").toString("base64")}`;
 
-  if (!recipient || !downloadUrl) {
-    return;
-  }
-
-  if (EXPORT_DELIVERY_EMAIL_ENDPOINT) {
-    await postJson(EXPORT_DELIVERY_EMAIL_ENDPOINT, {
-      job,
-      downloadUrl,
-      to: recipient,
-    });
-    return;
-  }
-
-  if (RESEND_API_KEY && RESEND_FROM_EMAIL) {
-    await postJson(
-      "https://api.resend.com/emails",
-      {
-        from: RESEND_FROM_EMAIL,
-        to: recipient,
-        subject: EXPORT_EMAIL_SUBJECT,
-        text: buildEmailBody(job, downloadUrl),
-      },
-      {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-      },
-    );
-    return;
-  }
-
-  console.info(`Export ready for ${recipient}: ${downloadUrl}`);
-}
-
-function buildEmailBody(job: ExportJob, downloadUrl: string): string {
-  const lines = [
-    `Hi there,`,
-    "",
-    "Your Script Speech export is complete.",
-    `Format: ${job.format.toUpperCase()}`,
-  ];
-
-  if (job.result?.fileName) {
-    lines.push(`File: ${job.result.fileName}`);
-  }
-
-  lines.push("", `Download: ${downloadUrl}`, "", "Thanks for using Script Speech!");
-  return lines.join("\n");
-}
-
-async function createSupabaseExportJob(payload: EnqueuePayload): Promise<ExportJob> {
-  const client = getSupabaseServiceClient();
-
-  const { data, error } = await client
-    .from(SUPABASE_EXPORT_JOBS_TABLE)
-    .insert({
-      project_id: payload.projectId,
-      format: payload.format,
-      status: "queued",
-      deliver_to_email: payload.deliverToEmail ?? null,
-      payload: { scriptDoc: payload.scriptDoc },
-    })
-    .select()
-    .single<ExportJobRow>();
-
-  if (error) {
-    throw new Error(formatSupabaseError("Failed to enqueue export job", error));
-  }
-
-  return toExportJob(data);
-}
-
-async function triggerExportProcessor(
-  jobId: string,
-  payload: EnqueuePayload,
-): Promise<void> {
-  if (EXPORT_PROCESSOR_URL) {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-
-    if (EXPORT_PROCESSOR_API_KEY) {
-      headers.Authorization = `Bearer ${EXPORT_PROCESSOR_API_KEY}`;
-    }
-
-    const response = await fetch(EXPORT_PROCESSOR_URL, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ jobId }),
-    });
-
-    if (!response.ok) {
-      console.error(
-        `Failed to trigger export processor for job ${jobId}: ${response.status} ${response.statusText}`,
-      );
-    }
-    return;
-  }
-
-  await processJobInline(jobId, payload);
-}
-
-async function fetchSupabaseJob(jobId: string): Promise<ExportJob | null> {
-  const client = getSupabaseServiceClient();
-
-  const { data, error } = await client
-    .from(SUPABASE_EXPORT_JOBS_TABLE)
-    .select()
-    .eq("id", jobId)
-    .maybeSingle<ExportJobRow>();
-
-  if (error) {
-    throw new Error(formatSupabaseError("Failed to load export job", error));
-  }
-
-  if (!data) {
-    return null;
-  }
-
-  return toExportJobWithSignedUrl(data);
-}
-
-async function processJobInline(jobId: string, payload: EnqueuePayload): Promise<void> {
-  const client = getSupabaseServiceClient();
-
-  const now = new Date().toISOString();
-  const { error: statusError } = await client
-    .from(SUPABASE_EXPORT_JOBS_TABLE)
-    .update({ status: "processing", updated_at: now })
-    .eq("id", jobId);
-
-  if (statusError) {
-    console.error(
-      formatSupabaseError("Failed to mark export job as processing", statusError),
-    );
-  }
-
-  try {
-    const rendered = await renderExport(payload);
-    const fileName = buildExportFileName(payload.projectId, rendered.extension);
-    const resultRow = await persistExportResult(jobId, {
-      ...rendered,
-      fileName,
-    });
-
-    const updatedJob = await finalizeJob(jobId, {
-      status: "completed",
-      result: resultRow,
-      error: null,
-    });
-
-    if (updatedJob?.deliverToEmail) {
-      await sendExportDeliveryEmail(updatedJob);
-    }
-  } catch (error) {
-    console.error("Export job failed", error);
-    await finalizeJob(jobId, {
-      status: "failed",
-      error: error instanceof Error ? error.message : "Export failed",
-      result: null,
-    });
-  }
-}
-
-async function persistExportResult(
-  jobId: string,
-  result: RenderedExportResult & { fileName: string },
-): Promise<ExportJobResultRow> {
-  const client = getSupabaseServiceClient();
-
-  const storagePath = `${jobId}/${result.fileName}`;
-
-  try {
-    const uploadResult = await client.storage
-      .from(SUPABASE_EXPORT_BUCKET)
-      .upload(storagePath, result.buffer, {
-        cacheControl: "3600",
-        upsert: true,
-        contentType: result.mime,
+      await updateExportJobRecord(jobId, {
+        status: "completed",
+        result: {
+          fileName,
+          downloadUrl,
+          notes: result.notes,
+        },
+        error: null,
       });
-
-    if (uploadResult.error) {
-      throw uploadResult.error;
+    } catch (error) {
+      await updateExportJobRecord(jobId, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unexpected export failure",
+      });
     }
-  } catch (error) {
-    console.error(`Failed to upload export result for job ${jobId}`, error);
-    return {
-      file_name: result.fileName,
-      download_url: createDataUrl(result.buffer, result.mime),
-      notes: combineNotes(
-        result.notes,
-        "Export stored as inline data URL because Supabase storage upload failed.",
-      ),
-      mime_type: result.mime,
-      size: result.buffer.byteLength,
-    };
   }
 
-  return {
-    file_name: result.fileName,
-    storage_path: storagePath,
-    notes: result.notes ?? null,
-    mime_type: result.mime,
-    size: result.buffer.byteLength,
-  };
-}
+  private async generateResult(payload: EnqueuePayload): Promise<StubResult> {
+    await wait(650 + Math.random() * 400);
 
-async function finalizeJob(
-  jobId: string,
-  update: {
-    status: ExportJobStatus;
-    result: ExportJobResultRow | null;
-    error: string | null;
-  },
-): Promise<ExportJob | null> {
-  const client = getSupabaseServiceClient();
-  const now = new Date().toISOString();
-
-  const { data, error } = await client
-    .from(SUPABASE_EXPORT_JOBS_TABLE)
-    .update({
-      status: update.status,
-      result: update.result,
-      error: update.error,
-      updated_at: now,
-    })
-    .eq("id", jobId)
-    .select()
-    .maybeSingle<ExportJobRow>();
-
-  if (error) {
-    console.error(formatSupabaseError("Failed to finalize export job", error));
-    return null;
-  }
-
-  return data ? await toExportJobWithSignedUrl(data) : null;
-}
-
-async function renderExport(payload: EnqueuePayload): Promise<RenderedExportResult> {
-  switch (payload.format) {
-    case "fountain": {
-      const content = scriptDocToFountain(payload.scriptDoc);
-      return {
-        buffer: Buffer.from(content, "utf8"),
-        extension: "fountain",
-        mime: "text/plain;charset=utf-8",
-        notes: "Generated using the built-in Fountain renderer.",
-      };
+    switch (payload.format) {
+      case "fountain": {
+        const content = scriptDocToFountain(payload.scriptDoc);
+        return {
+          content,
+          extension: "fountain",
+          mime: "text/plain;charset=utf-8",
+          notes: "Generated directly from the ScriptDoc structure.",
+        };
+      }
+      case "fdx":
+        return generateStubDocument(payload.format, payload.scriptDoc, payload.projectId, {
+          mime: "application/xml",
+          extension: "fdx",
+        });
+      case "docx":
+        return generateStubDocument(payload.format, payload.scriptDoc, payload.projectId, {
+          mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          extension: "docx",
+        });
+      case "pdf":
+        return generateStubDocument(payload.format, payload.scriptDoc, payload.projectId, {
+          mime: "application/pdf",
+          extension: "pdf",
+        });
+      default:
+        throw new Error(`Unsupported export format: ${job.format}`);
     }
-    case "fdx": {
-      const xml = scriptDocToFdx(payload.scriptDoc);
-      return {
-        buffer: Buffer.from(xml, "utf8"),
-        extension: "fdx",
-        mime: "application/xml",
-        notes: "Generated according to the Final Draft XML schema.",
-      };
-    }
-    case "docx": {
-      const docx = await scriptDocToDocx(payload.scriptDoc);
-      return {
-        buffer: docx,
-        extension: "docx",
-        mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        notes: "Generated using a minimal WordprocessingML document.",
-      };
-    }
-    case "pdf": {
-      const pdf = await scriptDocToPdf(payload.scriptDoc);
-      return {
-        buffer: pdf,
-        extension: "pdf",
-        mime: "application/pdf",
-        notes: "Rendered using PDFKit with screenplay-aware styling.",
-      };
-    }
-    default:
-      throw new Error(`Unsupported export format: ${payload.format}`);
-  }
-}
-
-function buildExportFileName(projectId: string, extension: string): string {
-  const normalized = projectId.replace(/[^a-z0-9-_]+/gi, "-").replace(/-+/g, "-");
-  return `${normalized || "script"}-${Date.now()}.${extension}`;
-}
-
-function createDataUrl(buffer: Buffer, mime: string): string {
-  return `data:${mime};base64,${buffer.toString("base64")}`;
-}
-
-function combineNotes(...notes: (string | undefined | null)[]): string {
-  return notes.filter(Boolean).join(" ");
-}
-
-async function toExportJobWithSignedUrl(row: ExportJobRow): Promise<ExportJob> {
-  const job = toExportJob(row);
-
-  if (row.result?.storage_path) {
-    const signedUrl = await createSignedDownloadUrl(row.result.storage_path);
-    if (signedUrl) {
-      job.result = {
-        fileName: row.result.file_name,
-        downloadUrl: signedUrl,
-        notes: row.result.notes ?? undefined,
-      };
-    }
-  } else if (row.result?.download_url) {
-    job.result = {
-      fileName: row.result.file_name,
-      downloadUrl: row.result.download_url,
-      notes: row.result.notes ?? undefined,
-    };
-  }
-
-  return job;
-}
-
-function toExportJob(row: ExportJobRow): ExportJob {
-  const job: ExportJob = {
-    id: row.id,
-    projectId: row.project_id,
-    format: row.format,
-    status: row.status,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-
-  if (row.deliver_to_email) {
-    job.deliverToEmail = row.deliver_to_email;
-  }
-
-  if (row.error) {
-    job.error = row.error;
-  }
-
-  return job;
-}
-
-async function createSignedDownloadUrl(path: string): Promise<string | null> {
-  try {
-    const client = getSupabaseAnonClient();
-    const { data, error } = await client.storage
-      .from(SUPABASE_EXPORT_BUCKET)
-      .createSignedUrl(path, 60 * 60);
-
-    if (error) {
-      throw error;
-    }
-
-    return data?.signedUrl ?? null;
-  } catch (error) {
-    console.error("Failed to create signed download URL", error);
-    return null;
   }
 }
 

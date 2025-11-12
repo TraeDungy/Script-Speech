@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { getExportJob } from "@/lib/exports";
+export async function GET(
+  _request: Request,
+  { params }: { params: { jobId: string } }
+) {
+  const queue = getExportQueue();
+  const job = await queue.getJob(params.jobId);
 
 const STREAM_INTERVAL_MS = 1500;
 

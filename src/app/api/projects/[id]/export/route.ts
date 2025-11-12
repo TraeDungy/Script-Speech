@@ -27,13 +27,14 @@ export async function POST(
     );
   }
 
-  try {
-    const job = await enqueueExportJob({
-      projectId: params.id,
-      format: body.format,
-      scriptDoc: body.scriptDoc,
-      deliverToEmail: body.deliverToEmail?.trim() || undefined,
-    });
+  const queue = getExportQueue();
+
+  const job = await queue.enqueue({
+    projectId: params.id,
+    format: body.format,
+    scriptDoc: body.scriptDoc,
+    deliverToEmail: body.deliverToEmail?.trim() || undefined,
+  });
 
     return NextResponse.json(job, { status: 202 });
   } catch (error) {
