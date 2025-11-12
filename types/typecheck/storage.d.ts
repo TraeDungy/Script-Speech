@@ -1,0 +1,18 @@
+export interface SignedUpload {
+  uploadUrl: string;
+  method: "PUT" | "POST";
+  headers: Record<string, string>;
+  assetUrl: string;
+  expiresAt: string;
+}
+
+export interface StorageProvider {
+  createSignedUpload(input: {
+    assetId: string;
+    contentType: string;
+    size: number;
+    projectId?: string | null;
+  }): Promise<SignedUpload>;
+}
+
+export function getStorageProvider(): StorageProvider;

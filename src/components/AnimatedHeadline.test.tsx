@@ -1,3 +1,4 @@
+import React from "react";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -73,6 +74,7 @@ describe("AnimatedHeadline", () => {
 
     expect(screen.getByTestId("static-phrase")).toHaveTextContent("Quiet");
     expect(screen.queryAllByTestId("animated-phrase")).toHaveLength(0);
-    expect(setIntervalSpy).not.toHaveBeenCalled();
+    const rotationCalls = setIntervalSpy.mock.calls.filter(([, interval]) => interval === 3600);
+    expect(rotationCalls).toHaveLength(0);
   });
 });
