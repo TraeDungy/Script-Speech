@@ -1,27 +1,5 @@
-import { randomUUID } from "crypto";
-import type { ExportFormat, ExportJob } from "./types";
-
-export interface ScriptDocDialogue {
-  character: string;
-  text: string;
-  parenthetical?: string;
-}
-
-export interface ScriptDocScene {
-  heading: string;
-  action?: string;
-  dialogue?: ScriptDocDialogue[];
-}
-
-export interface ScriptDoc {
-  title?: string;
-  logline?: string;
-  scenes: ScriptDocScene[];
-}
-
-interface ExportJobInternal extends ExportJob {
-  scriptDoc: ScriptDoc;
-}
+import { createExportJobRecord, fetchExportJobRecord, updateExportJobRecord } from "@/lib/db/exportJobs";
+import type { ExportFormat, ExportJob, ScriptDoc } from "./types";
 
 interface EnqueuePayload {
   projectId: string;
@@ -42,72 +20,53 @@ const globalRef = globalThis as typeof globalThis & {
 };
 
 export class ExportQueue {
-  private jobs = new Map<string, ExportJobInternal>();
+  async enqueue(payload: EnqueuePayload): Promise<ExportJob> {
+    const job = await createExportJobRecord(payload);
 
-  enqueue(payload: EnqueuePayload): ExportJob {
-    const id = randomUUID();
-    const now = new Date().toISOString();
-
-    const job: ExportJobInternal = {
-      id,
-      projectId: payload.projectId,
-      format: payload.format,
-      status: "queued",
-      createdAt: now,
-      updatedAt: now,
-      deliverToEmail: payload.deliverToEmail,
-      scriptDoc: payload.scriptDoc,
-    };
-
-    this.jobs.set(id, job);
     setTimeout(() => {
-      this.processJob(id).catch((error) => {
+      this.processJob(job.id, payload).catch((error) => {
         console.error("Export job failed", error);
       });
     }, 50);
 
-    return this.toPublicJob(job);
+    return job;
   }
 
-  getJob(jobId: string): ExportJob | undefined {
-    const job = this.jobs.get(jobId);
-    return job ? this.toPublicJob(job) : undefined;
+  async getJob(jobId: string): Promise<ExportJob | null> {
+    return fetchExportJobRecord(jobId);
   }
 
-  private async processJob(jobId: string) {
-    const job = this.jobs.get(jobId);
-    if (!job) {
-      return;
-    }
-
-    job.status = "processing";
-    job.updatedAt = new Date().toISOString();
+  private async processJob(jobId: string, payload: EnqueuePayload) {
+    await updateExportJobRecord(jobId, { status: "processing" });
 
     try {
-      const result = await this.generateResult(job);
-      const fileName = `${job.projectId}-${job.id}.${result.extension}`;
+      const result = await this.generateResult(payload);
+      const fileName = `${payload.projectId}-${jobId}.${result.extension}`;
       const downloadUrl = `data:${result.mime};base64,${Buffer.from(result.content, "utf8").toString("base64")}`;
 
-      job.result = {
-        fileName,
-        downloadUrl,
-        notes: result.notes,
-      };
-      job.status = "completed";
+      await updateExportJobRecord(jobId, {
+        status: "completed",
+        result: {
+          fileName,
+          downloadUrl,
+          notes: result.notes,
+        },
+        error: null,
+      });
     } catch (error) {
-      job.status = "failed";
-      job.error = error instanceof Error ? error.message : "Unexpected export failure";
+      await updateExportJobRecord(jobId, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unexpected export failure",
+      });
     }
-
-    job.updatedAt = new Date().toISOString();
   }
 
-  private async generateResult(job: ExportJobInternal): Promise<StubResult> {
+  private async generateResult(payload: EnqueuePayload): Promise<StubResult> {
     await wait(650 + Math.random() * 400);
 
-    switch (job.format) {
+    switch (payload.format) {
       case "fountain": {
-        const content = scriptDocToFountain(job.scriptDoc);
+        const content = scriptDocToFountain(payload.scriptDoc);
         return {
           content,
           extension: "fountain",
@@ -116,28 +75,23 @@ export class ExportQueue {
         };
       }
       case "fdx":
-        return generateStubDocument(job.format, job.scriptDoc, job.projectId, {
+        return generateStubDocument(payload.format, payload.scriptDoc, payload.projectId, {
           mime: "application/xml",
           extension: "fdx",
         });
       case "docx":
-        return generateStubDocument(job.format, job.scriptDoc, job.projectId, {
+        return generateStubDocument(payload.format, payload.scriptDoc, payload.projectId, {
           mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           extension: "docx",
         });
       case "pdf":
-        return generateStubDocument(job.format, job.scriptDoc, job.projectId, {
+        return generateStubDocument(payload.format, payload.scriptDoc, payload.projectId, {
           mime: "application/pdf",
           extension: "pdf",
         });
       default:
         throw new Error(`Unsupported export format: ${job.format}`);
     }
-  }
-
-  private toPublicJob(job: ExportJobInternal): ExportJob {
-    const { scriptDoc: _scriptDoc, ...rest } = job;
-    return { ...rest };
   }
 }
 

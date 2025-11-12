@@ -6,7 +6,7 @@ export async function GET(
   { params }: { params: { jobId: string } }
 ) {
   const queue = getExportQueue();
-  const job = queue.getJob(params.jobId);
+  const job = await queue.getJob(params.jobId);
 
   if (!job) {
     return NextResponse.json({ error: "Export job not found" }, { status: 404 });
