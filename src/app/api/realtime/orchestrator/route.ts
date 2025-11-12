@@ -384,8 +384,14 @@ async function dispatchToolInvocation(
 
 async function handleTranscriptFetch(payload: Record<string, unknown>) {
   const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
-  if (!sessionId) {
-    return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
+  const ackToken = typeof payload.ackToken === "string" ? payload.ackToken : null;
+  if (!sessionId || !ackToken) {
+    return NextResponse.json({ error: "Invalid transcript request" }, { status: 400 });
+  }
+
+  const entry = await ensureSessionCache(sessionId);
+  if (!entry || entry.ackToken !== ackToken) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
