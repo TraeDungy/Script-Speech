@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const assetId = request.nextUrl.searchParams.get("assetId");
 
   if (assetId) {
-    const asset = getReferenceAsset(assetId);
+    const asset = await getReferenceAsset(assetId);
     if (!asset) {
       return NextResponse.json({ error: "Asset not found" }, { status: 404 });
     }
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ asset: serializeReferenceAsset(asset) });
   }
 
-  const assets = listReferenceAssets(projectId);
+  const assets = await listReferenceAssets(projectId);
   return NextResponse.json({ assets: assets.map(serializeReferenceAsset) });
 }
 
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  const asset = createReferenceAsset({
+  const asset = await createReferenceAsset({
     name,
     description,
     contentType,
@@ -68,7 +68,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Missing assetId" }, { status: 400 });
   }
 
-  const asset = getReferenceAsset(assetId);
+  const asset = await getReferenceAsset(assetId);
   if (!asset) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   }
@@ -76,7 +76,7 @@ export async function PUT(request: NextRequest) {
   const contentType = request.headers.get("content-type") ?? asset.contentType;
   const data = Buffer.from(await request.arrayBuffer());
 
-  const updated = recordAssetBinary(assetId, data, contentType);
+  const updated = await recordAssetBinary(assetId, data, contentType);
   if (!updated) {
     return NextResponse.json({ error: "Unable to update asset" }, { status: 500 });
   }
@@ -92,7 +92,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  const asset = updateReferenceAsset(assetId, updates);
+  const asset = await updateReferenceAsset(assetId, updates);
   if (!asset) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   }

@@ -29,7 +29,7 @@ export async function POST(
 
   const queue = getExportQueue();
 
-  const job = queue.enqueue({
+  const job = await queue.enqueue({
     projectId: params.id,
     format: body.format,
     scriptDoc: body.scriptDoc,
