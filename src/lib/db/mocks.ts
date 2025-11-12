@@ -10,6 +10,44 @@ import type {
 } from "@/lib/types/assets";
 import type { ExportJobRow, ProjectRow, ScriptDocRow } from "./schema";
 
+type MockProjectRole = "owner" | "editor" | "member" | "viewer";
+
+const mockProjectMemberships = new Map<
+  string,
+  Array<{ userId: string; role: MockProjectRole }>
+>();
+
+mockProjectMemberships.set("demo-project", [
+  { userId: "demo-user", role: "owner" },
+]);
+
+export function upsertMockProjectMembership(
+  projectId: string,
+  userId: string,
+  role: MockProjectRole,
+): void {
+  const entries = mockProjectMemberships.get(projectId) ?? [];
+  const existingIndex = entries.findIndex((entry) => entry.userId === userId);
+  if (existingIndex >= 0) {
+    entries[existingIndex] = { userId, role };
+  } else {
+    entries.push({ userId, role });
+  }
+  mockProjectMemberships.set(projectId, entries);
+}
+
+export function getMockProjectMembership(
+  projectId: string,
+  userId: string,
+): { projectId: string; userId: string; role: MockProjectRole } | null {
+  const entries = mockProjectMemberships.get(projectId);
+  const record = entries?.find((entry) => entry.userId === userId);
+  if (!record) {
+    return null;
+  }
+  return { projectId, userId, role: record.role };
+}
+
 const MOCK_PROJECT_ID = "demo-project";
 
 const baseScriptDoc: ScriptDoc = {

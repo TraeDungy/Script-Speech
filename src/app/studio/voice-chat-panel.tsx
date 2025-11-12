@@ -78,7 +78,7 @@ function extractTextFromContent(content: unknown): string {
   };
 
   visit(content);
-  return fragments.join("").trim();
+  return fragments.join("");
 }
 
 function transcriptToMessage(turn: TranscriptTurnDTO): TranscriptMessage {
@@ -216,7 +216,12 @@ export function VoiceChatPanel() {
 
           if (index >= 0) {
             const existing = next[index];
-            const newText = trimmedText ? (append ? `${existing.text}${trimmedText}` : trimmedText) : existing.text;
+            const newText =
+              normalizedText !== undefined
+                ? append
+                  ? `${existing.text}${normalizedText}`
+                  : normalizedText
+                : existing.text;
 
             next[index] = {
               ...existing,
@@ -226,7 +231,7 @@ export function VoiceChatPanel() {
               final: final ?? existing.final,
               updatedAt: Date.now(),
             };
-          } else if (trimmedText) {
+          } else if (typeof normalizedText === "string" && normalizedText.length > 0) {
             next.push({
               id,
               role: resolvedRole ?? formatRole(role),
@@ -290,6 +295,20 @@ export function VoiceChatPanel() {
         if (text) {
           updateMessage(response?.id as string | undefined, response?.role as string | undefined, text, true, false);
         }
+        return;
+      }
+
+      if (type === "response.output_text.delta") {
+        const text = extractTextFromContent(data.delta ?? data.text ?? data);
+        if (text) {
+          updateMessage(data.response_id as string | undefined, data.role as string | undefined, text, false, true);
+        }
+        return;
+      }
+
+      if (type === "response.output_text.done") {
+        updateMessage(data.response_id as string | undefined, data.role as string | undefined, undefined, true, false);
+        return;
       }
     },
     [setMessages],

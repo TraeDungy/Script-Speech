@@ -16,6 +16,13 @@ import {
   persistSessionMetadata,
   persistTranscriptTurn,
 } from "@/lib/transcripts.server";
+import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
+import {
+  ensureProjectMembership,
+  ProjectAuthorizationError,
+} from "@/lib/authz/projects.server";
+import { enforceRateLimit } from "@/lib/rateLimit";
+import { logAuditEvent } from "@/lib/auditLog";
 
 const DEFAULT_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL ?? "gpt-4o-realtime-preview-2024-12-10";
 const DEFAULT_REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE ?? "verse";
@@ -28,35 +35,6 @@ interface SessionCacheEntry {
 }
 
 const sessionCache = new Map<string, SessionCacheEntry>();
-
-class FixedWindowRateLimiter {
-  private readonly hits = new Map<string, { count: number; resetAt: number }>();
-
-  constructor(private readonly limit: number, private readonly windowMs: number) {}
-
-  consume(key: string, weight = 1) {
-    const now = Date.now();
-    const record = this.hits.get(key);
-    if (!record || record.resetAt <= now) {
-      const next = { count: weight, resetAt: now + this.windowMs };
-      this.hits.set(key, next);
-      return { allowed: weight <= this.limit, resetAt: next.resetAt };
-    }
-
-    if (record.count + weight > this.limit) {
-      return { allowed: false, resetAt: record.resetAt };
-    }
-
-    record.count += weight;
-    return { allowed: true, resetAt: record.resetAt };
-  }
-}
-
-const rateLimiter = new FixedWindowRateLimiter(120, 60_000);
-
-function getClientIp(request: NextRequest) {
-  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? request.ip ?? "unknown";
-}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && Object.getPrototypeOf(value) === Object.prototype;
@@ -167,7 +145,11 @@ function normalizeSessionMetadata(
   return metadata;
 }
 
-async function handleSessionCreate(request: NextRequest, payload: Record<string, unknown>) {
+async function handleSessionCreate(
+  request: NextRequest,
+  payload: Record<string, unknown>,
+  userId: string,
+) {
   const projectId = typeof payload.projectId === "string" ? payload.projectId : undefined;
   const requestedSessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;
 
@@ -215,6 +197,14 @@ async function handleSessionCreate(request: NextRequest, payload: Record<string,
     console.warn("Failed to hydrate transcript history", error);
   }
 
+  await logAuditEvent({
+    action: "realtime.session.create",
+    userId,
+    projectId,
+    targetId: metadata.sessionId,
+    details: { requestedSessionId, expiresAt: metadata.expiresAt },
+  });
+
   return NextResponse.json(
     { session, metadata },
     {
@@ -253,7 +243,7 @@ function parseTranscriptTurn(payload: unknown): TranscriptTurnDTO | null {
   };
 }
 
-async function handleTranscriptAppend(payload: Record<string, unknown>) {
+async function handleTranscriptAppend(payload: Record<string, unknown>, userId: string) {
   const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
   const ackToken = typeof payload.ackToken === "string" ? payload.ackToken : null;
   const turn = parseTranscriptTurn(payload.turn);
@@ -272,12 +262,25 @@ async function handleTranscriptAppend(payload: Record<string, unknown>) {
     return NextResponse.json({ error: "Transcript failed moderation" }, { status: 400 });
   }
 
+  const projectId = turn.projectId ?? entry.projectId;
+  if (projectId) {
+    await ensureProjectMembership(projectId, userId, { minimumRole: "member" });
+  }
+
   try {
-    await persistTranscriptTurn({ ...turn, sessionId, projectId: turn.projectId ?? entry.projectId });
+    await persistTranscriptTurn({ ...turn, sessionId, projectId });
   } catch (error) {
     console.warn("Failed to persist transcript turn", error);
     return NextResponse.json({ error: "Unable to persist transcript" }, { status: 500 });
   }
+
+  await logAuditEvent({
+    action: "transcript.turn.append",
+    userId,
+    projectId: projectId ?? undefined,
+    targetId: turn.id,
+    details: { role: turn.role, final: turn.final },
+  });
 
   return NextResponse.json(
     {
@@ -294,6 +297,7 @@ async function handleTranscriptAppend(payload: Record<string, unknown>) {
 
 async function dispatchToolInvocation(
   payload: Record<string, unknown>,
+  userId: string,
 ): Promise<NextResponse<ToolAcknowledgement | { error: string }>> {
   const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
   const ackToken = typeof payload.ackToken === "string" ? payload.ackToken : null;
@@ -315,6 +319,10 @@ async function dispatchToolInvocation(
 
   invocation.sessionId = sessionId;
   invocation.projectId = typeof payload.projectId === "string" ? payload.projectId : entry.projectId;
+
+  if (invocation.projectId) {
+    await ensureProjectMembership(invocation.projectId, userId, { minimumRole: "member" });
+  }
 
   const validationErrors = validateToolInvocationPayload(invocation);
   if (validationErrors.length > 0) {
@@ -340,13 +348,22 @@ async function dispatchToolInvocation(
       return NextResponse.json(acknowledgement, { status: 400 });
     }
 
+    const projectId = turn.projectId ?? invocation.projectId;
     try {
-      await persistTranscriptTurn({ ...turn, sessionId, projectId: turn.projectId ?? invocation.projectId });
+      await persistTranscriptTurn({ ...turn, sessionId, projectId });
       acknowledgement.transcriptTurn = { ...turn, sessionId };
     } catch (error) {
       console.warn("Failed to persist transcript turn", error);
       return NextResponse.json({ error: "Unable to persist transcript" }, { status: 500 });
     }
+
+    await logAuditEvent({
+      action: "transcript.turn.append",
+      userId,
+      projectId: projectId ?? undefined,
+      targetId: turn.id,
+      details: { role: turn.role, final: turn.final },
+    });
 
     return NextResponse.json(acknowledgement, { status: 200 });
   }
@@ -374,6 +391,15 @@ async function dispatchToolInvocation(
       return NextResponse.json({ error: "Unable to persist project state" }, { status: 500 });
     }
 
+    await logAuditEvent({
+      action: "project.state.patch",
+      userId,
+      projectId: invocation.projectId ?? undefined,
+      targetId: sessionId,
+      details: { reason },
+      severity: "high",
+    });
+
     return NextResponse.json(acknowledgement, { status: 200 });
   }
 
@@ -382,13 +408,18 @@ async function dispatchToolInvocation(
   return NextResponse.json(acknowledgement, { status: 400 });
 }
 
-async function handleTranscriptFetch(payload: Record<string, unknown>) {
+async function handleTranscriptFetch(payload: Record<string, unknown>, userId: string) {
   const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
   if (!sessionId) {
     return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
   }
 
   try {
+    const entry = await ensureSessionCache(sessionId);
+    if (entry?.projectId) {
+      await ensureProjectMembership(entry.projectId, userId);
+    }
+
     const transcripts = await fetchTranscriptTurns(sessionId, 200);
     return NextResponse.json({ transcripts }, { status: 200 });
   } catch (error) {
@@ -398,57 +429,82 @@ async function handleTranscriptFetch(payload: Record<string, unknown>) {
 }
 
 export async function POST(request: NextRequest) {
-  const rate = rateLimiter.consume(getClientIp(request));
-  if (!rate.allowed) {
-    return NextResponse.json(
-      { error: "Rate limit exceeded" },
-      {
-        status: 429,
-        headers: {
-          "Retry-After": Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000)).toString(),
-        },
-      },
-    );
-  }
-
-  let payload: unknown;
   try {
-    payload = await request.json();
-  } catch {
-    payload = {};
-  }
+    const { user } = await requireServerAuthSession();
+    const rate = await enforceRateLimit({
+      key: user.id,
+      limit: 120,
+      windowMs: 60_000,
+      prefix: "realtime:orchestrator",
+    });
 
-  const data = isPlainObject(payload) ? payload : {};
-  const action = typeof data.action === "string" ? data.action : "session.create";
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": Math.max(
+              1,
+              Math.ceil((rate.resetAt - Date.now()) / 1000),
+            ).toString(),
+          },
+        },
+      );
+    }
 
-  if (action === "session.create") {
+    let payload: unknown;
     try {
-      return await handleSessionCreate(request, data);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to create session";
-      return NextResponse.json({ error: message }, { status: 502 });
+      payload = await request.json();
+    } catch {
+      payload = {};
     }
-  }
 
-  if (action === "transcript.append") {
-    return handleTranscriptAppend(data);
-  }
+    const data = isPlainObject(payload) ? payload : {};
+    const action = typeof data.action === "string" ? data.action : "session.create";
 
-  if (action === "transcript.fetch") {
-    return handleTranscriptFetch(data);
-  }
+    if (action === "session.create") {
+      if (typeof data.projectId === "string") {
+        await ensureProjectMembership(data.projectId, user.id, { minimumRole: "member" });
+      }
 
-  if (action === "tool.invoke") {
-    return dispatchToolInvocation(data);
-  }
-
-  if (action === "ack.parse") {
-    const acknowledgement = parseToolAcknowledgement(data.payload);
-    if (!acknowledgement) {
-      return NextResponse.json({ error: "Invalid acknowledgement payload" }, { status: 400 });
+      try {
+        return await handleSessionCreate(request, data, user.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to create session";
+        return NextResponse.json({ error: message }, { status: 502 });
+      }
     }
-    return NextResponse.json({ acknowledgement }, { status: 200 });
-  }
 
-  return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
+    if (action === "transcript.append") {
+      return handleTranscriptAppend(data, user.id);
+    }
+
+    if (action === "transcript.fetch") {
+      return handleTranscriptFetch(data, user.id);
+    }
+
+    if (action === "tool.invoke") {
+      return dispatchToolInvocation(data, user.id);
+    }
+
+    if (action === "ack.parse") {
+      const acknowledgement = parseToolAcknowledgement(data.payload);
+      if (!acknowledgement) {
+        return NextResponse.json({ error: "Invalid acknowledgement payload" }, { status: 400 });
+      }
+      return NextResponse.json({ acknowledgement }, { status: 200 });
+    }
+
+    return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error instanceof ProjectAuthorizationError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    console.error("Realtime orchestrator error", error);
+    return NextResponse.json({ error: "Unexpected orchestrator error" }, { status: 500 });
+  }
 }

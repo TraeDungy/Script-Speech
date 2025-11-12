@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 
-import { enqueueExportJob, type ExportQueuePayload } from "@/lib/exports";
-import type { ExportFormat } from "@/lib/exports/types";
+import { enqueueExportJob } from "@/lib/exports";
+import type { ExportFormat, ScriptDoc } from "@/lib/exports/types";
+import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
 import {
-  captureApiException,
-  recordApiError,
-  recordApiRequest,
-  withSpan,
-} from "@/lib/observability";
+  ensureProjectMembership,
+  ProjectAuthorizationError,
+} from "@/lib/authz/projects.server";
+import { enforceRateLimit } from "@/lib/rateLimit";
+import { logAuditEvent } from "@/lib/auditLog";
 
 interface RequestBody {
   format?: ExportFormat;
@@ -15,17 +16,15 @@ interface RequestBody {
   deliverToEmail?: string;
 }
 
-type RouteContext = { params: { id: string } };
-
-export async function POST(request: Request, { params }: RouteContext) {
-  recordApiRequest("projects/export", "POST");
+export async function POST(
+  request: Request,
+  { params }: { params: { id: string } },
+) {
   let body: RequestBody;
 
   try {
     body = await request.json();
-  } catch (error) {
-    recordApiError("projects/export", "POST", 400);
-    console.error("Invalid JSON payload for export", error);
+  } catch {
     return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
   }
 
@@ -37,36 +36,57 @@ export async function POST(request: Request, { params }: RouteContext) {
     );
   }
 
-  try {
-    const job = await withSpan(
-      {
-        name: "api.projects.export.post",
-        attributes: { projectId: params.id, format: body.format },
-      },
-      async (span) => {
-        const payload: ExportQueuePayload = {
-          projectId: params.id,
-          format: body.format!,
-          scriptDoc: body.scriptDoc!,
-          deliverToEmail: body.deliverToEmail?.trim() || undefined,
-        };
-        const queued = await enqueueExportJob(payload);
-        span.setAttribute("job.id", queued.id);
-        span.setAttribute("job.status", queued.status);
-        return queued;
-      },
-    );
+  const projectId = params.id;
 
-    console.info("[api] queued export job", {
-      jobId: job.id,
-      projectId: params.id,
-      format: job.format,
-      deliverToEmail: job.deliverToEmail,
+  try {
+    const { user } = await requireServerAuthSession();
+    await ensureProjectMembership(projectId, user.id, { minimumRole: "member" });
+
+    const rate = await enforceRateLimit({
+      key: `${user.id}:${projectId}`,
+      limit: 5,
+      windowMs: 5 * 60 * 1000,
+      prefix: "exports",
+    });
+
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: "Export rate limit exceeded" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": Math.max(
+              1,
+              Math.ceil((rate.resetAt - Date.now()) / 1000),
+            ).toString(),
+          },
+        },
+      );
+    }
+
+    const job = await enqueueExportJob({
+      projectId,
+      format: body.format,
+      scriptDoc: body.scriptDoc,
+      deliverToEmail: body.deliverToEmail?.trim() || undefined,
+    });
+
+    await logAuditEvent({
+      action: "export.job.enqueue",
+      userId: user.id,
+      projectId,
+      targetId: job.id,
+      details: { format: job.format, deliverToEmail: job.deliverToEmail ?? null },
     });
 
     return NextResponse.json(job, { status: 202 });
   } catch (error) {
-    recordApiError("projects/export", "POST", 500);
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error instanceof ProjectAuthorizationError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     console.error("Failed to enqueue export job", error);
     await captureApiException(error, {
       route: "projects/export",

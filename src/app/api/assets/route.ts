@@ -1,5 +1,6 @@
 import { Buffer } from "buffer";
 import { NextRequest, NextResponse } from "next/server";
+
 import {
   createReferenceAsset,
   getReferenceAsset,
@@ -15,110 +16,134 @@ import {
   withSpan,
 } from "@/lib/observability";
 import { getStorageProvider } from "@/lib/storage";
+import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
+import {
+  ensureProjectMembership,
+  ProjectAuthorizationError,
+} from "@/lib/authz/projects.server";
+import { enforceRateLimit } from "@/lib/rateLimit";
+import { logAuditEvent } from "@/lib/auditLog";
 
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  recordApiRequest("assets", "GET");
+  try {
+    const { user } = await requireServerAuthSession();
+    const projectId = request.nextUrl.searchParams.get("projectId");
+    const assetId = request.nextUrl.searchParams.get("assetId");
 
-  const projectId = request.nextUrl.searchParams.get("projectId");
-  const assetId = request.nextUrl.searchParams.get("assetId");
-
-  if (assetId) {
-    try {
-      const asset = await withSpan(
-        { name: "api.assets.get-one", attributes: { assetId } },
-        async (span) => {
-          const record = await getReferenceAsset(assetId);
-          if (record) {
-            span.setAttribute("asset.projectId", record.projectId ?? "");
-          }
-          return record;
-        },
-      );
-
+    if (assetId) {
+      const asset = await getReferenceAsset(assetId);
       if (!asset) {
-        recordApiError("assets", "GET", 404);
         return NextResponse.json({ error: "Asset not found" }, { status: 404 });
       }
 
-      return NextResponse.json({ asset: serializeReferenceAsset(asset) });
-    } catch (error) {
-      recordApiError("assets", "GET", 500);
-      console.error("Failed to fetch reference asset", error);
-      await captureApiException(error, { route: "assets", method: "GET", status: 500 });
-      return NextResponse.json({ error: "Unable to load asset" }, { status: 500 });
-    }
-  }
+      if (asset.projectId) {
+        await ensureProjectMembership(asset.projectId, user.id);
+      }
 
-  try {
-    const assets = await withSpan(
-      { name: "api.assets.list", attributes: { projectId: projectId ?? "all" } },
-      async (span) => {
-        const records = await listReferenceAssets(projectId);
-        span.setAttribute("asset.count", records.length);
-        return records;
-      },
-    );
+      return NextResponse.json({ asset: serializeReferenceAsset(asset) });
+    }
+
+    if (projectId) {
+      await ensureProjectMembership(projectId, user.id);
+    }
+
+    const assets = await listReferenceAssets(projectId);
     return NextResponse.json({ assets: assets.map(serializeReferenceAsset) });
   } catch (error) {
-    recordApiError("assets", "GET", 500);
-    console.error("Failed to list reference assets", error);
-    await captureApiException(error, { route: "assets", method: "GET", status: 500 });
-    return NextResponse.json({ error: "Unable to list assets" }, { status: 500 });
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error instanceof ProjectAuthorizationError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    console.error("Failed to list assets", error);
+    return NextResponse.json({ error: "Unable to load assets" }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
-  recordApiRequest("assets", "POST");
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
 
-  const body = await request.json();
   const { name, description, contentType, size, projectId, tags, sourceType, url } = body;
 
-  if (!name || !contentType || typeof size !== "number") {
+  if (typeof name !== "string" || typeof contentType !== "string" || typeof size !== "number") {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
   try {
-    const { asset, upload } = await withSpan(
-      { name: "api.assets.post", attributes: { route: "/api/assets" } },
-      async (span) => {
-        const created = await createReferenceAsset({
-          name,
-          description,
-          contentType,
-          size,
-          projectId,
-          tags,
-          sourceType,
-          url,
-        });
+    const { user } = await requireServerAuthSession();
+    if (typeof projectId === "string" && projectId) {
+      await ensureProjectMembership(projectId, user.id, { minimumRole: "member" });
+    }
 
-        span.setAttribute("asset.id", created.id);
-        span.setAttribute("asset.projectId", created.projectId ?? "");
+    const rate = await enforceRateLimit({
+      key: `${user.id}:${projectId ?? "global"}:create`,
+      limit: 20,
+      windowMs: 60_000,
+      prefix: "assets",
+    });
 
-        const storage = getStorageProvider();
-        const signedUpload = await storage.createSignedUpload({
-          assetId: created.id,
-          contentType,
-          size,
-          projectId,
-        });
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: "Asset creation rate limit exceeded" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": Math.max(
+              1,
+              Math.ceil((rate.resetAt - Date.now()) / 1000),
+            ).toString(),
+          },
+        },
+      );
+    }
 
-        return { asset: created, upload: signedUpload };
-      },
-    );
+    const asset = await createReferenceAsset({
+      name,
+      description: typeof description === "string" ? description : undefined,
+      contentType,
+      size,
+      projectId: typeof projectId === "string" ? projectId : null,
+      tags: Array.isArray(tags) ? (tags as string[]) : undefined,
+      sourceType: typeof sourceType === "string" ? sourceType : undefined,
+      url: typeof url === "string" ? url : undefined,
+    });
 
-    console.info("[api] created reference asset", { assetId: asset.id, projectId });
+    await logAuditEvent({
+      action: "asset.create",
+      userId: user.id,
+      projectId: asset.projectId ?? undefined,
+      targetId: asset.id,
+      details: { name: asset.name, contentType: asset.contentType, size: asset.size },
+    });
+
+    const storage = getStorageProvider();
+    const signedUpload = await storage.createSignedUpload({
+      assetId: asset.id,
+      contentType,
+      size,
+      projectId: asset.projectId ?? undefined,
+    });
 
     return NextResponse.json({
       asset: serializeReferenceAsset(asset),
-      upload,
+      upload: signedUpload,
     });
   } catch (error) {
-    recordApiError("assets", "POST", 500);
-    console.error("Failed to create reference asset", error);
-    await captureApiException(error, { route: "assets", method: "POST", status: 500 });
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error instanceof ProjectAuthorizationError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    console.error("Failed to create asset", error);
     return NextResponse.json({ error: "Unable to create asset" }, { status: 500 });
   }
 }
@@ -132,72 +157,116 @@ export async function PUT(request: NextRequest) {
   }
 
   try {
+    const { user } = await requireServerAuthSession();
     const asset = await getReferenceAsset(assetId);
     if (!asset) {
-      recordApiError("assets", "PUT", 404);
       return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+    }
+
+    if (asset.projectId) {
+      await ensureProjectMembership(asset.projectId, user.id, { minimumRole: "member" });
+    }
+
+    const rate = await enforceRateLimit({
+      key: `${user.id}:${asset.projectId ?? "global"}:upload`,
+      limit: 10,
+      windowMs: 60_000,
+      prefix: "assets",
+    });
+
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: "Asset upload rate limit exceeded" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": Math.max(
+              1,
+              Math.ceil((rate.resetAt - Date.now()) / 1000),
+            ).toString(),
+          },
+        },
+      );
     }
 
     const contentType = request.headers.get("content-type") ?? asset.contentType;
     const data = Buffer.from(await request.arrayBuffer());
 
-    const updated = await withSpan(
-      { name: "api.assets.put", attributes: { assetId } },
-      async (span) => {
-        const record = await recordAssetBinary(assetId, data, contentType);
-        if (record) {
-          span.setAttribute("asset.updated", true);
-        }
-        return record;
-      },
-    );
-
+    const updated = await recordAssetBinary(assetId, data, contentType);
     if (!updated) {
-      recordApiError("assets", "PUT", 500);
       return NextResponse.json({ error: "Unable to update asset" }, { status: 500 });
     }
 
+    await logAuditEvent({
+      action: "asset.binary.upload",
+      userId: user.id,
+      projectId: updated.projectId ?? undefined,
+      targetId: updated.id,
+      details: { contentType: updated.contentType, size: updated.size },
+      severity: "high",
+    });
+
     return NextResponse.json({ asset: serializeReferenceAsset(updated) });
   } catch (error) {
-    recordApiError("assets", "PUT", 500);
-    console.error("Failed to upload asset binary", error);
-    await captureApiException(error, { route: "assets", method: "PUT", status: 500 });
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error instanceof ProjectAuthorizationError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    console.error("Failed to upload asset", error);
     return NextResponse.json({ error: "Unable to update asset" }, { status: 500 });
   }
 }
 
 export async function PATCH(request: NextRequest) {
-  recordApiRequest("assets", "PATCH");
+  let body: Record<string, unknown>;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  }
 
-  const body = await request.json();
-  const { assetId, updates } = body;
+  const assetId = typeof body.assetId === "string" ? body.assetId : undefined;
+  const updates = body.updates as Record<string, unknown> | undefined;
 
-  if (!assetId || typeof updates !== "object") {
+  if (!assetId || !updates || typeof updates !== "object") {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 
   try {
-    const asset = await withSpan(
-      { name: "api.assets.patch", attributes: { assetId } },
-      async (span) => {
-        const record = await updateReferenceAsset(assetId, updates);
-        if (record) {
-          span.setAttribute("asset.updated", true);
-        }
-        return record;
-      },
-    );
-
-    if (!asset) {
-      recordApiError("assets", "PATCH", 404);
+    const { user } = await requireServerAuthSession();
+    const existing = await getReferenceAsset(assetId);
+    if (!existing) {
       return NextResponse.json({ error: "Asset not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ asset: serializeReferenceAsset(asset) });
+    if (existing.projectId) {
+      await ensureProjectMembership(existing.projectId, user.id, { minimumRole: "member" });
+    }
+
+    const updated = await updateReferenceAsset(assetId, updates);
+    if (!updated) {
+      return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+    }
+
+    await logAuditEvent({
+      action: "asset.update",
+      userId: user.id,
+      projectId: updated.projectId ?? undefined,
+      targetId: updated.id,
+      details: updates,
+    });
+
+    return NextResponse.json({ asset: serializeReferenceAsset(updated) });
   } catch (error) {
-    recordApiError("assets", "PATCH", 500);
-    console.error("Failed to update reference asset", error);
-    await captureApiException(error, { route: "assets", method: "PATCH", status: 500 });
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error instanceof ProjectAuthorizationError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    console.error("Failed to update asset metadata", error);
     return NextResponse.json({ error: "Unable to update asset" }, { status: 500 });
   }
 }
