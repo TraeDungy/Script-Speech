@@ -10,9 +10,11 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.45.3",
     "next": "14.2.11",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "zustand": "4.5.4"
   },
   "devDependencies": {
     "@types/node": "20.14.15",

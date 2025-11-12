@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRealtimeClient, type RealtimeClientEvent } from "@/lib/realtime";
+import type { OrchestratorSessionMetadata, TranscriptTurnDTO } from "@/lib/realtime/schema";
+import type { ScriptDocTranscriptEntry } from "@/lib/scriptDoc";
+import { useScriptDocStore } from "@/lib/state/scriptDocStore";
 
 type TranscriptMessage = {
   id: string;
   role: string;
+  canonicalRole: string;
   text: string;
   final: boolean;
   updatedAt: number;
@@ -43,9 +47,7 @@ function extractTextFromContent(content: unknown): string {
     }
 
     if (typeof value === "string") {
-      if (value.length > 0) {
-        fragments.push(value);
-      }
+      fragments.push(value);
       return;
     }
 
@@ -79,27 +81,108 @@ function extractTextFromContent(content: unknown): string {
   return fragments.join("");
 }
 
+function transcriptToMessage(turn: TranscriptTurnDTO): TranscriptMessage {
+  return {
+    id: turn.id,
+    role: formatRole(turn.role),
+    canonicalRole: turn.role,
+    text: turn.text,
+    final: turn.final,
+    updatedAt: new Date(turn.createdAt).getTime(),
+  };
+}
+
+function transcriptToStoreEntry(turn: TranscriptTurnDTO): ScriptDocTranscriptEntry {
+  return {
+    id: turn.id,
+    role: turn.role,
+    text: turn.text,
+    final: turn.final,
+    createdAt: turn.createdAt,
+  };
+}
+
+function messageToStoreEntry(message: TranscriptMessage): ScriptDocTranscriptEntry {
+  return {
+    id: message.id,
+    role: message.canonicalRole,
+    text: message.text,
+    final: message.final,
+    createdAt: new Date(message.updatedAt).toISOString(),
+  };
+}
+
 export function VoiceChatPanel() {
+  const projectId = useScriptDocStore((state) => state.doc.metadata.projectId);
+  const appendTranscriptTurn = useScriptDocStore((state) => state.appendTranscriptTurn);
+  const loadTranscriptLog = useScriptDocStore((state) => state.loadTranscriptLog);
+  const applyScriptDocPatch = useScriptDocStore((state) => state.applyPatch);
+
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState>("new");
   const [isMicActive, setIsMicActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-
-  const clientRef = useRef(createRealtimeClient());
+  const sessionMetadataRef = useRef<OrchestratorSessionMetadata | null>(null);
+  const persistedMessagesRef = useRef(new Set<string>());
+  const clientRef = useRef(createRealtimeClient({ projectId }));
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setPrefersReducedMotion(mediaQuery.matches);
 
     update();
-    mediaQuery.addEventListener("change", update);
 
-    return () => {
-      mediaQuery.removeEventListener("change", update);
-    };
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", update);
+      return () => mediaQuery.removeEventListener("change", update);
+    }
+
+    if (typeof mediaQuery.addListener === "function") {
+      mediaQuery.addListener(update);
+      return () => mediaQuery.removeListener(update);
+    }
+
+    return;
   }, []);
+
+  const ingestTranscriptTurn = useCallback(
+    (turn: TranscriptTurnDTO) => {
+      const message = transcriptToMessage(turn);
+      setMessages((previous) => {
+        const next = [...previous];
+        const index = next.findIndex((entry) => entry.id === message.id);
+        const now = Date.now();
+        if (index >= 0) {
+          next[index] = {
+            ...next[index],
+            role: message.role,
+            canonicalRole: message.canonicalRole,
+            text: message.text,
+            final: message.final,
+            updatedAt: now,
+          };
+        } else {
+          next.push({ ...message, updatedAt: now });
+        }
+
+        if (next.length > MAX_MESSAGES) {
+          return next.slice(-MAX_MESSAGES);
+        }
+
+        return next;
+      });
+
+      persistedMessagesRef.current.add(message.id);
+      appendTranscriptTurn(transcriptToStoreEntry(turn));
+    },
+    [appendTranscriptTurn],
+  );
 
   const processPayload = useCallback(
     (payload: unknown) => {
@@ -128,7 +211,8 @@ export function VoiceChatPanel() {
           const next = [...previous];
           const index = next.findIndex((message) => message.id === id);
           const resolvedRole = role ? formatRole(role) : undefined;
-          const normalizedText = typeof text === "string" ? text : undefined;
+          const canonicalRole = role ?? (index >= 0 ? next[index].canonicalRole : "assistant");
+          const trimmedText = text?.trim();
 
           if (index >= 0) {
             const existing = next[index];
@@ -142,6 +226,7 @@ export function VoiceChatPanel() {
             next[index] = {
               ...existing,
               role: resolvedRole ?? existing.role,
+              canonicalRole,
               text: newText,
               final: final ?? existing.final,
               updatedAt: Date.now(),
@@ -150,7 +235,8 @@ export function VoiceChatPanel() {
             next.push({
               id,
               role: resolvedRole ?? formatRole(role),
-              text: normalizedText,
+              canonicalRole,
+              text: trimmedText,
               final: Boolean(final),
               updatedAt: Date.now(),
             });
@@ -249,6 +335,47 @@ export function VoiceChatPanel() {
         return;
       }
 
+      if (event.type === "session-metadata") {
+        const previousSessionId = sessionMetadataRef.current?.sessionId;
+        sessionMetadataRef.current = event.metadata ?? null;
+
+        if (!event.metadata) {
+          return;
+        }
+
+        if (!previousSessionId || previousSessionId !== event.metadata.sessionId) {
+          persistedMessagesRef.current.clear();
+        }
+
+        if (event.metadata.transcripts?.length) {
+          const sorted = [...event.metadata.transcripts].sort(
+            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+          );
+          setMessages(sorted.map(transcriptToMessage));
+          for (const turn of sorted) {
+            persistedMessagesRef.current.add(turn.id);
+          }
+          loadTranscriptLog(sorted.map(transcriptToStoreEntry));
+        } else if (!previousSessionId || previousSessionId !== event.metadata.sessionId) {
+          setMessages([]);
+          loadTranscriptLog([]);
+        }
+
+        return;
+      }
+
+      if (event.type === "tool-acknowledged") {
+        if (event.acknowledgement.projectStatePatch) {
+          applyScriptDocPatch(event.acknowledgement.projectStatePatch);
+        }
+
+        if (event.acknowledgement.transcriptTurn) {
+          ingestTranscriptTurn(event.acknowledgement.transcriptTurn);
+        }
+
+        return;
+      }
+
       if (event.type === "realtime-event") {
         setError(null);
         processPayload(event.payload);
@@ -273,12 +400,67 @@ export function VoiceChatPanel() {
       client.stopMicrophone();
       client.disconnect();
       setIsMicActive(false);
+      sessionMetadataRef.current = null;
+      persistedMessagesRef.current.clear();
     };
-  }, [processPayload]);
+  }, [applyScriptDocPatch, ingestTranscriptTurn, loadTranscriptLog, processPayload]);
 
   const sortedMessages = useMemo(() => {
     return [...messages].sort((a, b) => a.updatedAt - b.updatedAt);
   }, [messages]);
+
+  useEffect(() => {
+    const metadata = sessionMetadataRef.current;
+    if (!metadata?.ackToken || !metadata.sessionId) {
+      return;
+    }
+
+    const finalMessages = messages.filter((message) => message.final && !persistedMessagesRef.current.has(message.id));
+    if (!finalMessages.length) {
+      return;
+    }
+
+    for (const message of finalMessages) {
+      persistedMessagesRef.current.add(message.id);
+      void (async () => {
+        try {
+          const response = await fetch("/api/realtime/orchestrator", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "transcript.append",
+              sessionId: metadata.sessionId,
+              ackToken: metadata.ackToken,
+              projectId: metadata.projectId ?? projectId,
+              turn: {
+                id: message.id,
+                role: message.canonicalRole,
+                text: message.text,
+                final: message.final,
+                createdAt: new Date(message.updatedAt).toISOString(),
+              },
+            }),
+          });
+
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            persistedMessagesRef.current.delete(message.id);
+            console.warn("Failed to persist transcript turn", payload?.error ?? response.statusText);
+            return;
+          }
+
+          if (payload?.acknowledgement?.transcriptTurn) {
+            appendTranscriptTurn(transcriptToStoreEntry(payload.acknowledgement.transcriptTurn as TranscriptTurnDTO));
+          } else {
+            appendTranscriptTurn(messageToStoreEntry(message));
+          }
+        } catch (err) {
+          persistedMessagesRef.current.delete(message.id);
+          console.warn("Transcript persistence error", err);
+        }
+      })();
+    }
+  }, [appendTranscriptTurn, messages, projectId]);
 
   const statusLabel = useMemo(() => {
     switch (connectionState) {
