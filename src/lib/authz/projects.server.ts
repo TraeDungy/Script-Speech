@@ -1,5 +1,3 @@
-import { cache } from "react";
-
 import { getSupabaseClient } from "@/lib/db/client";
 import { isSupabaseConfigured } from "@/lib/db/config";
 import type { ProjectMemberRow, ProjectRow } from "@/lib/db/schema";
@@ -76,22 +74,23 @@ async function fetchSupabaseMembership(
   return { projectId, userId, role };
 }
 
-const getCachedMembership = cache(
-  async (projectId: string, userId: string): Promise<ProjectMembership | null> => {
-    if (!isSupabaseConfigured()) {
-      return getMockProjectMembership(projectId, userId);
-    }
+async function getProjectMembership(
+  projectId: string,
+  userId: string,
+): Promise<ProjectMembership | null> {
+  if (!isSupabaseConfigured()) {
+    return getMockProjectMembership(projectId, userId);
+  }
 
-    return fetchSupabaseMembership(projectId, userId);
-  },
-);
+  return fetchSupabaseMembership(projectId, userId);
+}
 
 export async function ensureProjectMembership(
   projectId: string,
   userId: string,
   options: { minimumRole?: ProjectRole } = {},
 ): Promise<ProjectMembership> {
-  const membership = await getCachedMembership(projectId, userId);
+  const membership = await getProjectMembership(projectId, userId);
 
   if (!membership) {
     throw new ProjectAuthorizationError();
