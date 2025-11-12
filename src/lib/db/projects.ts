@@ -3,12 +3,14 @@ import { randomUUID } from "node:crypto";
 import { getSupabaseClient } from "./client";
 import { isSupabaseConfigured } from "./config";
 import {
+  getMockProjectMembership,
   getMockProjectRow,
   getMockScriptDoc,
   listMockProjects,
+  upsertMockProjectMembership,
 } from "./mocks";
 import { fetchLatestScriptDoc } from "./scriptDocs";
-import type { ProjectRow } from "./schema";
+import type { ProjectMemberRow, ProjectRow } from "./schema";
 import type { ScriptDoc } from "@/lib/scriptDoc";
 
 export interface ProjectSummary {
@@ -20,6 +22,7 @@ export interface ProjectSummary {
   status: ProjectRow["status"];
   createdAt: string;
   updatedAt: string;
+  ownerId: string | null;
   targetLength?: { unit: ProjectRow["target_length_unit"]; value: number | null };
   tags: string[];
 }
@@ -29,6 +32,7 @@ export interface ListProjectsOptions {
   status?: ProjectRow["status"];
   limit?: number;
   cursor?: string;
+  userId?: string;
 }
 
 export interface ListProjectsResult {
@@ -46,6 +50,7 @@ export interface CreateProjectInput {
   status?: ProjectRow["status"];
   targetLength?: { unit: ProjectRow["target_length_unit"]; value?: number | null };
   tags?: string[];
+  ownerId: string;
 }
 
 export interface UpdateProjectInput {
@@ -70,11 +75,54 @@ function mapProjectRow(row: ProjectRow): ProjectSummary {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    ownerId: row.owner_id,
     targetLength: row.target_length_unit
       ? { unit: row.target_length_unit, value: row.target_length_value }
       : undefined,
     tags: row.tags ?? [],
   };
+}
+
+async function resolveAccessibleProjectIds(userId: string): Promise<string[]> {
+  if (!isSupabaseConfigured()) {
+    const owned = localProjects
+      .filter((project) => project.ownerId === userId)
+      .map((project) => project.id);
+    const mockProjects = listMockProjects()
+      .map(mapProjectRow)
+      .filter((project) => Boolean(getMockProjectMembership(project.id, userId)))
+      .map((project) => project.id);
+    return Array.from(new Set([...owned, ...mockProjects]));
+  }
+
+  const supabase = getSupabaseClient();
+  const ids = new Set<string>();
+
+  const { data: owned, error: ownedError } = await supabase
+    .from<ProjectRow>("projects")
+    .select("id")
+    .eq("owner_id", userId);
+
+  if (ownedError) {
+    console.error("Failed to load owned project ids", ownedError);
+    throw ownedError;
+  }
+
+  owned?.forEach((row) => ids.add(row.id));
+
+  const { data: memberships, error: membershipError } = await supabase
+    .from<ProjectMemberRow>("project_members")
+    .select("project_id")
+    .eq("user_id", userId);
+
+  if (membershipError) {
+    console.error("Failed to load project memberships", membershipError);
+    throw membershipError;
+  }
+
+  memberships?.forEach((row) => ids.add(row.project_id));
+
+  return Array.from(ids);
 }
 
 export async function listProjects(
@@ -84,6 +132,14 @@ export async function listProjects(
 
   if (!isSupabaseConfigured()) {
     let projects = [...listMockProjects().map(mapProjectRow), ...localProjects];
+    if (options.userId) {
+      projects = projects.filter((project) => {
+        if (project.ownerId === options.userId) {
+          return true;
+        }
+        return Boolean(getMockProjectMembership(project.id, options.userId));
+      });
+    }
     if (options.status) {
       projects = projects.filter((project) => project.status === options.status);
     }
@@ -110,6 +166,14 @@ export async function listProjects(
     .select("*", { count: "exact" })
     .order("updated_at", { ascending: false })
     .limit(limit + 1);
+
+  if (options.userId) {
+    const accessibleIds = await resolveAccessibleProjectIds(options.userId);
+    if (!accessibleIds.length) {
+      return { projects: [], total: 0, hasMore: false };
+    }
+    query = query.in("id", accessibleIds);
+  }
 
   if (options.status) {
     query = query.eq("status", options.status);
@@ -210,10 +274,12 @@ export async function createProject(
       status: input.status ?? "draft",
       createdAt: now,
       updatedAt: now,
+      ownerId: input.ownerId,
       targetLength: input.targetLength,
       tags: input.tags ?? [],
     };
     localProjects.push(summary);
+    upsertMockProjectMembership(summary.id, input.ownerId, "owner");
     return summary;
   }
 
@@ -227,6 +293,7 @@ export async function createProject(
     target_length_unit: input.targetLength?.unit ?? null,
     target_length_value: input.targetLength?.value ?? null,
     tags: input.tags ?? [],
+    owner_id: input.ownerId,
   };
 
   const { data, error } = await supabase

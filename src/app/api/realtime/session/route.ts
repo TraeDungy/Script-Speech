@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
+import { enforceRateLimit } from "@/lib/rateLimit";
+
 const DEFAULT_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL ?? "gpt-4o-realtime-preview-2024-12-10";
 const DEFAULT_REALTIME_VOICE = process.env.OPENAI_REALTIME_VOICE ?? "verse";
 
@@ -81,6 +84,30 @@ async function createSession() {
 
 export async function POST() {
   try {
+    const { user } = await requireServerAuthSession();
+    const rate = await enforceRateLimit({
+      key: user.id,
+      limit: 15,
+      windowMs: 60_000,
+      prefix: "realtime",
+    });
+
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: "Realtime session rate limit exceeded" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": Math.max(
+              1,
+              Math.ceil((rate.resetAt - Date.now()) / 1000),
+            ).toString(),
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
     const session = await createSession();
     return NextResponse.json(session, {
       status: 200,
@@ -89,6 +116,17 @@ export async function POST() {
       },
     });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        {
+          status: 401,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
     const message = error instanceof Error ? error.message : "Failed to create realtime session";
     return NextResponse.json(
       { error: message },
