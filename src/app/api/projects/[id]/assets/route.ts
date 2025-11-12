@@ -16,12 +16,14 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   const projectId = params.id;
-  const assets = listEntityAssets(projectId).map(serializeEntityAsset);
-  const references = listReferenceAssets(projectId).map(serializeReferenceAsset);
+  const [assets, references] = await Promise.all([
+    listEntityAssets(projectId),
+    listReferenceAssets(projectId),
+  ]);
 
   return NextResponse.json({
-    assets,
-    references
+    assets: assets.map(serializeEntityAsset),
+    references: references.map(serializeReferenceAsset),
   });
 }
 
@@ -37,7 +39,7 @@ export async function POST(
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  if (!getReferenceAsset(assetId)) {
+  if (!(await getReferenceAsset(assetId))) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 });
   }
 
@@ -45,7 +47,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid entity type" }, { status: 400 });
   }
 
-  const entityAsset = upsertEntityAsset({
+  const entityAsset = await upsertEntityAsset({
     projectId,
     assetId,
     entityId,

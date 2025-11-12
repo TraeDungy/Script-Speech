@@ -1,96 +1,20 @@
-"use client";
+import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 
-import { create } from "zustand";
+import type { ScriptDoc } from "@/lib/scriptDoc";
+import type {
+  CreateReferenceAssetInput,
+  EntityAsset,
+  EntityAssetTargetType,
+  ReferenceAsset,
+} from "@/lib/types/assets";
+import type { ExportJobRow, ProjectRow, ScriptDocRow } from "./schema";
 
-import { getMockScriptDoc } from "@/lib/db/mocks";
+const MOCK_PROJECT_ID = "demo-project";
 
-import {
-  ScriptDoc,
-  ScriptDocBeat,
-  ScriptScene,
-  ScriptSceneElement,
-  type ScriptDocTranscriptEntry,
-} from "@/lib/scriptDoc";
-
-type ScriptDocHistoryState = {
-  doc: ScriptDoc;
-  past: ScriptDoc[];
-  future: ScriptDoc[];
-};
-
-export interface ScriptDocStore extends ScriptDocHistoryState {
-  hasUndo: boolean;
-  hasRedo: boolean;
-  loadDoc: (doc: ScriptDoc) => void;
-  updateMetadata: (updates: Partial<ScriptDoc["metadata"]>) => void;
-  setCustomFormatDefinition: (definition: ScriptDoc["metadata"]["customFormatDefinition"] | null) => void;
-  updateBeat: (beatId: string, updates: Partial<ScriptDocBeat>) => void;
-  addBeatAfter: (beatId?: string) => void;
-  reorderBeats: (fromIndex: number, toIndex: number) => void;
-  updateScene: (sceneId: string, updater: (scene: ScriptScene) => void) => void;
-  updateSceneElement: (
-    sceneId: string,
-    elementId: string,
-    updater: (element: ScriptSceneElement) => void,
-  ) => void;
-  updateConceptAnalysis: (
-    updater: (analysis: ScriptDoc["conceptAnalysis"]) => void,
-  ) => void;
-  applyPatch: (patch: Partial<ScriptDoc>) => void;
-  appendTranscriptTurn: (turn: ScriptDocTranscriptEntry) => void;
-  loadTranscriptLog: (turns: ScriptDocTranscriptEntry[]) => void;
-  undo: () => void;
-  redo: () => void;
-}
-
-const structuredCloneDoc = (doc: ScriptDoc): ScriptDoc =>
-  typeof structuredClone === "function"
-    ? structuredClone(doc)
-    : JSON.parse(JSON.stringify(doc)) as ScriptDoc;
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && Object.getPrototypeOf(value) === Object.prototype;
-
-const deepMerge = (target: unknown, patch: unknown): unknown => {
-  if (Array.isArray(target) && Array.isArray(patch)) {
-    return patch;
-  }
-
-  if (isPlainObject(target) && isPlainObject(patch)) {
-    const result: Record<string, unknown> = { ...target };
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined) {
-        continue;
-      }
-
-      result[key] = key in result ? deepMerge(result[key], value) : value;
-    }
-    return result;
-  }
-
-  return patch;
-};
-
-const mergeScriptDocPatch = (doc: ScriptDoc, patch: Partial<ScriptDoc>): ScriptDoc => {
-  const merged = deepMerge(structuredCloneDoc(doc), patch) as ScriptDoc;
-  ensureOrder(merged);
-  return merged;
-};
-
-const applyOrder = <T extends { order: number }>(items: T[]) => {
-  items.forEach((item, index) => {
-    item.order = index;
-  });
-};
-
-const randomId = () =>
-  (typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2, 10));
-
-const initialDoc: ScriptDoc = {
+const baseScriptDoc: ScriptDoc = {
   metadata: {
-    projectId: "demo-project",
+    projectId: MOCK_PROJECT_ID,
     title: "Echoes on the Pier",
     format: "feature",
     genre: "Sci-Fi Drama",
@@ -408,270 +332,294 @@ const initialDoc: ScriptDoc = {
     isFranchiseExtension: true,
     extensionNotes:
       "Expands the Reyes family universe established in the short doc, bridging into feature territory.",
-    conversationLog: [],
   },
 };
 
-function ensureOrder(doc: ScriptDoc) {
-  applyOrder(doc.beats);
-  applyOrder(doc.scenes);
+const fallbackThumbnails = [
+  "linear-gradient(135deg, rgba(15,15,18,0.92), rgba(39,39,42,0.88))",
+  "linear-gradient(135deg, rgba(24,24,27,0.9), rgba(63,63,70,0.82))",
+  "linear-gradient(135deg, rgba(9,9,11,0.95), rgba(36,36,40,0.85))",
+];
+
+function computePreviewColor(id: string): string {
+  const hash = id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return fallbackThumbnails[hash % fallbackThumbnails.length];
 }
 
-ensureOrder(initialDoc);
+const mockReferenceAssets: ReferenceAsset[] = [
+  {
+    id: "asset-moonlight",
+    projectId: MOCK_PROJECT_ID,
+    name: "Moonlit tide study",
+    description: "Long exposure photo of the pier with bioluminescent tide.",
+    sourceType: "external",
+    url: "https://example.com/assets/moonlight.jpg",
+    thumbnailUrl: "https://example.com/assets/moonlight-thumb.jpg",
+    previewColor: "linear-gradient(135deg, rgba(15,15,18,0.92), rgba(39,39,42,0.88))",
+    contentType: "image/jpeg",
+    size: 102400,
+    tags: ["lighting", "location"],
+    status: "ready",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    attribution: "J. Alvarez",
+  },
+  {
+    id: "asset-console",
+    projectId: MOCK_PROJECT_ID,
+    name: "Analog mixing console",
+    description: "Reference board for the studio flashback.",
+    sourceType: "upload",
+    url: "https://example.com/assets/console.png",
+    thumbnailUrl: "https://example.com/assets/console-thumb.png",
+    previewColor: "linear-gradient(135deg, rgba(24,24,27,0.9), rgba(63,63,70,0.82))",
+    contentType: "image/png",
+    size: 204800,
+    tags: ["prop"],
+    status: "ready",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    attribution: "Set design team",
+  },
+];
 
-export const useScriptDocStore = create<ScriptDocStore>((set, get) => ({
-  doc: structuredCloneDoc(initialDoc),
-  past: [],
-  future: [],
-  hasUndo: false,
-  hasRedo: false,
-  loadDoc: (doc) => {
-    const cloned = structuredCloneDoc(doc);
-    ensureOrder(cloned);
-    set({
-      doc: cloned,
-      past: [],
-      future: [],
-      hasUndo: false,
-      hasRedo: false,
-    });
+const mockEntityAssets: EntityAsset[] = [
+  {
+    id: "entity-asset-1",
+    projectId: MOCK_PROJECT_ID,
+    assetId: "asset-moonlight",
+    entityId: "scene-arrival",
+    entityType: "scene",
+    caption: "Bioluminescent tides cue the anomaly reveal.",
+    order: 0,
+    isPrivate: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   },
-  updateMetadata: (updates) => {
-    const state = get();
-    const previous = state.doc;
-    const draft = structuredCloneDoc(previous);
-    draft.metadata = { ...draft.metadata, ...updates };
-    ensureOrder(draft);
-    set({
-      doc: draft,
-      past: [...state.past, previous],
-      future: [],
-      hasUndo: true,
-      hasRedo: false,
-    });
-  },
-  setCustomFormatDefinition: (definition) => {
-    const state = get();
-    const previous = state.doc;
-    const draft = structuredCloneDoc(previous);
-    draft.metadata = {
-      ...draft.metadata,
-      customFormatDefinition: definition || undefined,
+];
+
+const exportJobs = new Map<string, ExportJobRow>();
+
+function cloneScriptDoc(): ScriptDoc {
+  return typeof structuredClone === "function"
+    ? structuredClone(baseScriptDoc)
+    : JSON.parse(JSON.stringify(baseScriptDoc));
+}
+
+function cloneReferenceAssets(): ReferenceAsset[] {
+  return mockReferenceAssets.map((asset) => ({ ...asset }));
+}
+
+function cloneEntityAssets(): EntityAsset[] {
+  return mockEntityAssets.map((asset) => ({ ...asset }));
+}
+
+export function getMockProjectRow(): ProjectRow {
+  const metadata = baseScriptDoc.metadata;
+  return {
+    id: metadata.projectId,
+    title: metadata.title,
+    script_type: metadata.format,
+    genre: metadata.genre,
+    logline: metadata.logline,
+    status: metadata.status,
+    created_at: metadata.createdAt,
+    updated_at: metadata.updatedAt,
+    owner_id: null,
+    tags: metadata.toneKeywords,
+    target_length_unit: metadata.targetLength.unit,
+    target_length_value: metadata.targetLength.value,
+  };
+}
+
+export function getMockScriptDocRow(): ScriptDocRow {
+  return {
+    id: "script-doc-1",
+    project_id: MOCK_PROJECT_ID,
+    doc: cloneScriptDoc(),
+    revision_id: baseScriptDoc.revision?.id ?? null,
+    created_at: baseScriptDoc.metadata.createdAt,
+    updated_at: baseScriptDoc.metadata.updatedAt,
+  };
+}
+
+export function listMockProjects(): ProjectRow[] {
+  return [getMockProjectRow()];
+}
+
+export function getMockScriptDoc(): ScriptDoc {
+  return cloneScriptDoc();
+}
+
+export function listMockReferenceAssets(projectId?: string | null): ReferenceAsset[] {
+  if (!projectId) {
+    return cloneReferenceAssets();
+  }
+  return cloneReferenceAssets().filter(
+    (asset) => asset.projectId === projectId || asset.projectId === null,
+  );
+}
+
+export function listMockEntityAssets(projectId: string): EntityAsset[] {
+  return cloneEntityAssets().filter((asset) => asset.projectId === projectId);
+}
+
+export function createMockReferenceAsset(
+  input: CreateReferenceAssetInput,
+): ReferenceAsset {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const asset: ReferenceAsset = {
+    id,
+    projectId: input.projectId ?? null,
+    name: input.name,
+    description: input.description ?? null,
+    sourceType: input.sourceType ?? (input.url ? "external" : "upload"),
+    url: input.url ?? "",
+    thumbnailUrl: null,
+    previewColor: computePreviewColor(id),
+    contentType: input.contentType,
+    size: input.size,
+    tags: input.tags ?? [],
+    status: "pending",
+    createdAt: now,
+    updatedAt: now,
+    attribution: input.attribution ?? null,
+  };
+
+  mockReferenceAssets.push(asset);
+  return { ...asset };
+}
+
+export function updateMockReferenceAsset(
+  assetId: string,
+  updates: Partial<ReferenceAsset>,
+): ReferenceAsset | undefined {
+  const index = mockReferenceAssets.findIndex((asset) => asset.id === assetId);
+  if (index === -1) {
+    return undefined;
+  }
+
+  const merged: ReferenceAsset = {
+    ...mockReferenceAssets[index],
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  };
+
+  mockReferenceAssets[index] = merged;
+  return { ...merged };
+}
+
+export function recordMockAssetBinary(
+  assetId: string,
+  data: Buffer,
+  contentType: string,
+): ReferenceAsset | undefined {
+  const asset = mockReferenceAssets.find((item) => item.id === assetId);
+  if (!asset) {
+    return undefined;
+  }
+
+  const encoded = `data:${contentType};base64,${data.toString("base64")}`;
+  const updated: ReferenceAsset = {
+    ...asset,
+    url: encoded,
+    thumbnailUrl: encoded,
+    contentType,
+    size: data.byteLength,
+    status: "ready",
+    updatedAt: new Date().toISOString(),
+  };
+
+  const index = mockReferenceAssets.findIndex((item) => item.id === assetId);
+  mockReferenceAssets[index] = updated;
+  return { ...updated };
+}
+
+export function upsertMockEntityAsset(input: {
+  projectId: string;
+  assetId: string;
+  entityId: string;
+  entityType: EntityAssetTargetType;
+  caption?: string | null;
+  isPrivate?: boolean;
+  order?: number;
+}): EntityAsset {
+  const existingIndex = mockEntityAssets.findIndex(
+    (entity) =>
+      entity.projectId === input.projectId &&
+      entity.assetId === input.assetId &&
+      entity.entityId === input.entityId &&
+      entity.entityType === input.entityType,
+  );
+
+  if (existingIndex >= 0) {
+    const updated: EntityAsset = {
+      ...mockEntityAssets[existingIndex],
+      caption: input.caption ?? mockEntityAssets[existingIndex].caption,
+      order: input.order ?? mockEntityAssets[existingIndex].order,
+      isPrivate: input.isPrivate ?? mockEntityAssets[existingIndex].isPrivate,
+      updatedAt: new Date().toISOString(),
     };
-    set({
-      doc: draft,
-      past: [...state.past, previous],
-      future: [],
-      hasUndo: true,
-      hasRedo: false,
-    });
-  },
-  updateBeat: (beatId, updates) => {
-    const apply = get();
-    const previous = apply.doc;
-    const draft = structuredCloneDoc(previous);
-    const beat = draft.beats.find((b) => b.id === beatId);
-    if (!beat) {
-      return;
-    }
-    Object.assign(beat, updates);
-    ensureOrder(draft);
-    set({
-      doc: draft,
-      past: [...apply.past, previous],
-      future: [],
-      hasUndo: true,
-      hasRedo: false,
-    });
-  },
-  addBeatAfter: (beatId) => {
-    const state = get();
-    const previous = state.doc;
-    const draft = structuredCloneDoc(previous);
-    const beats = draft.beats;
-    const insertIndex = beatId
-      ? Math.max(
-          0,
-          beats.findIndex((beat) => beat.id === beatId) + 1,
-        )
-      : beats.length;
-    const newBeat: ScriptDocBeat = {
-      id: randomId(),
-      order: insertIndex,
-      title: "New beat",
-      summary: "Detail what should happen in this moment.",
-      spotlightCharacterIds: [],
-      locationIds: [],
-      referenceAssetIds: [],
-      sceneIds: [],
-    };
-    beats.splice(insertIndex, 0, newBeat);
-    ensureOrder(draft);
-    set({
-      doc: draft,
-      past: [...state.past, previous],
-      future: [],
-      hasUndo: true,
-      hasRedo: false,
-    });
-  },
-  reorderBeats: (fromIndex, toIndex) => {
-    const state = get();
-    const previous = state.doc;
-    const draft = structuredCloneDoc(previous);
-    const beats = draft.beats;
-    if (
-      fromIndex < 0 ||
-      fromIndex >= beats.length ||
-      toIndex < 0 ||
-      toIndex >= beats.length
-    ) {
-      return;
-    }
-    const [moved] = beats.splice(fromIndex, 1);
-    beats.splice(toIndex, 0, moved);
-    ensureOrder(draft);
-    set({
-      doc: draft,
-      past: [...state.past, previous],
-      future: [],
-      hasUndo: true,
-      hasRedo: false,
-    });
-  },
-  updateScene: (sceneId, updater) => {
-    const state = get();
-    const previous = state.doc;
-    const draft = structuredCloneDoc(previous);
-    const scene = draft.scenes.find((s) => s.id === sceneId);
-    if (!scene) {
-      return;
-    }
-    updater(scene);
-    ensureOrder(draft);
-    set({
-      doc: draft,
-      past: [...state.past, previous],
-      future: [],
-      hasUndo: true,
-      hasRedo: false,
-    });
-  },
-  updateSceneElement: (sceneId, elementId, updater) => {
-    const state = get();
-    const previous = state.doc;
-    const draft = structuredCloneDoc(previous);
-    const scene = draft.scenes.find((s) => s.id === sceneId);
-    if (!scene) {
-      return;
-    }
-    const element = scene.elements.find((el) => el.id === elementId);
-    if (!element) {
-      return;
-    }
-    updater(element);
-    set({
-      doc: draft,
-      past: [...state.past, previous],
-      future: [],
-      hasUndo: true,
-      hasRedo: false,
-    });
-  },
-  updateConceptAnalysis: (updater) => {
-    const state = get();
-    const previous = state.doc;
-    const draft = structuredCloneDoc(previous);
-    updater(draft.conceptAnalysis);
-    set({
-      doc: draft,
-      past: [...state.past, previous],
-      future: [],
-      hasUndo: true,
-      hasRedo: false,
-    });
-  },
-  applyPatch: (patch) => {
-    const state = get();
-    const merged = mergeScriptDocPatch(state.doc, patch);
-    set({
-      doc: merged,
-      past: state.past,
-      future: state.future,
-      hasUndo: state.hasUndo,
-      hasRedo: state.hasRedo,
-    });
-  },
-  appendTranscriptTurn: (turn) => {
-    const state = get();
-    const draft = structuredCloneDoc(state.doc);
-    const log = Array.isArray(draft.conceptAnalysis.conversationLog)
-      ? [...draft.conceptAnalysis.conversationLog]
-      : [];
-    const index = log.findIndex((entry) => entry.id === turn.id);
-    if (index >= 0) {
-      log[index] = { ...log[index], ...turn };
-    } else {
-      log.push({ ...turn });
-    }
-    log.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    draft.conceptAnalysis.conversationLog = log;
-    set({
-      doc: draft,
-      past: state.past,
-      future: state.future,
-      hasUndo: state.hasUndo,
-      hasRedo: state.hasRedo,
-    });
-  },
-  loadTranscriptLog: (turns) => {
-    const state = get();
-    const draft = structuredCloneDoc(state.doc);
-    draft.conceptAnalysis.conversationLog = [...turns].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-    );
-    set({
-      doc: draft,
-      past: state.past,
-      future: state.future,
-      hasUndo: state.hasUndo,
-      hasRedo: state.hasRedo,
-    });
-  },
-  undo: () => {
-    const state = get();
-    if (!state.past.length) {
-      return;
-    }
-    const previous = state.past[state.past.length - 1];
-    const newPast = state.past.slice(0, -1);
-    set({
-      doc: previous,
-      past: newPast,
-      future: [state.doc, ...state.future],
-      hasUndo: newPast.length > 0,
-      hasRedo: true,
-    });
-  },
-  redo: () => {
-    const state = get();
-    if (!state.future.length) {
-      return;
-    }
-    const [next, ...rest] = state.future;
-    set({
-      doc: next,
-      past: [...state.past, state.doc],
-      future: rest,
-      hasUndo: true,
-      hasRedo: rest.length > 0,
-    });
-  },
-}));
+    mockEntityAssets[existingIndex] = updated;
+    return { ...updated };
+  }
 
-export const selectBeats = (state: ScriptDocStore) =>
-  [...state.doc.beats].sort((a, b) => a.order - b.order);
+  const entity: EntityAsset = {
+    id: randomUUID(),
+    projectId: input.projectId,
+    assetId: input.assetId,
+    entityId: input.entityId,
+    entityType: input.entityType,
+    caption: input.caption ?? null,
+    order: input.order ?? 0,
+    isPrivate: input.isPrivate ?? false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 
-export const selectScenes = (state: ScriptDocStore) =>
-  [...state.doc.scenes].sort((a, b) => a.order - b.order);
+  mockEntityAssets.push(entity);
+  return { ...entity };
+}
 
+export function findMockReferenceAsset(assetId: string): ReferenceAsset | undefined {
+  const asset = mockReferenceAssets.find((item) => item.id === assetId);
+  return asset ? { ...asset } : undefined;
+}
+
+export function listMockExportJobs(): ExportJobRow[] {
+  return Array.from(exportJobs.values()).map((job) => ({ ...job }));
+}
+
+export function getMockExportJob(jobId: string): ExportJobRow | undefined {
+  const job = exportJobs.get(jobId);
+  return job ? { ...job } : undefined;
+}
+
+export function upsertMockExportJob(job: ExportJobRow): void {
+  exportJobs.set(job.id, { ...job });
+}
+
+export function createMockExportJob(payload: {
+  projectId: string;
+  format: ExportJobRow["format"];
+  scriptDoc: ScriptDoc;
+  deliverToEmail?: string | null;
+}): ExportJobRow {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const job: ExportJobRow = {
+    id,
+    project_id: payload.projectId,
+    format: payload.format,
+    status: "queued",
+    deliver_to_email: payload.deliverToEmail ?? null,
+    script_doc: payload.scriptDoc,
+    result: null,
+    error: null,
+    created_at: now,
+    updated_at: now,
+  };
+  exportJobs.set(id, job);
+  return { ...job };
+}

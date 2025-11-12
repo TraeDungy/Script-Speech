@@ -19,3 +19,21 @@ export interface ExportJob {
   result?: ExportJobResult;
   error?: string;
 }
+
+export interface ScriptDocDialogue {
+  character: string;
+  text: string;
+  parenthetical?: string;
+}
+
+export interface ScriptDocScene {
+  heading: string;
+  action?: string;
+  dialogue?: ScriptDocDialogue[];
+}
+
+export interface ScriptDoc {
+  title?: string;
+  logline?: string;
+  scenes: ScriptDocScene[];
+}
