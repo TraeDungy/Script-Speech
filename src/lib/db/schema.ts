@@ -73,3 +73,10 @@ export interface ExportJobRow {
   created_at: string;
   updated_at: string;
 }
+
+export interface MarketingContentRow<T = unknown> {
+  slug: string;
+  data: T;
+  created_at: string;
+  updated_at: string;
+}
