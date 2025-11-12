@@ -105,7 +105,3 @@ export async function GET(
     return NextResponse.json({ error: "Failed to read export job" }, { status: 500 });
   }
 }
-
-function formatSseEvent(event: string, data: string): string {
-  return `event: ${event}\ndata: ${data}\n\n`;
-}

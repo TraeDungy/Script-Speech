@@ -926,6 +926,7 @@ export default function StudioPage() {
 
       <section>
         <ConceptIntelligencePanel />
+      </section>
       <section className="grid gap-10 md:grid-cols-[1.4fr_1fr]">
         <div className="space-y-6">
           <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur">

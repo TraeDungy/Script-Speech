@@ -12,7 +12,7 @@ import { logAuditEvent } from "@/lib/auditLog";
 
 interface RequestBody {
   format?: ExportFormat;
-  scriptDoc?: ScriptDoc;
+  scriptDoc?: ExportQueuePayload["scriptDoc"];
   deliverToEmail?: string;
 }
 
@@ -29,6 +29,7 @@ export async function POST(
   }
 
   if (!body.format || !body.scriptDoc) {
+    recordApiError("projects/export", "POST", 400);
     return NextResponse.json(
       { error: "Both format and scriptDoc are required" },
       { status: 400 },
@@ -87,9 +88,11 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     console.error("Failed to enqueue export job", error);
-    return NextResponse.json(
-      { error: "Failed to enqueue export job" },
-      { status: 500 },
-    );
+    await captureApiException(error, {
+      route: "projects/export",
+      method: "POST",
+      status: 500,
+    });
+    return NextResponse.json({ error: "Failed to enqueue export job" }, { status: 500 });
   }
 }

@@ -9,6 +9,12 @@ import {
   serializeReferenceAsset,
   updateReferenceAsset,
 } from "@/lib/assets";
+import {
+  captureApiException,
+  recordApiError,
+  recordApiRequest,
+  withSpan,
+} from "@/lib/observability";
 import { getStorageProvider } from "@/lib/storage";
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
 import {
@@ -143,6 +149,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
+  recordApiRequest("assets", "PUT");
+
   const assetId = request.nextUrl.searchParams.get("assetId");
   if (!assetId) {
     return NextResponse.json({ error: "Missing assetId" }, { status: 400 });

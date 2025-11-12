@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "vitest"
+    "test": "vitest",
+    "test:unit": "vitest run",
+    "test:e2e": "node ./scripts/run-e2e-tests.mjs",
+    "type-check": "tsc --project tsconfig.typecheck.json",
+    "check": "npm run lint && npm run type-check && npm run test:unit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.665.0",

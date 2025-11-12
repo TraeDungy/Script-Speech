@@ -1,0 +1,37 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@/lib/accessRequests.server": ["./types/typecheck/accessRequests.server.d.ts"],
+      "@/lib/db/assets": ["./types/typecheck/db-assets.d.ts"],
+      "@/lib/assets": ["./types/typecheck/assets.d.ts"],
+      "@/lib/db/exportJobs": ["./types/typecheck/db-exportJobs.d.ts"],
+      "@/lib/scriptFormats": ["./types/typecheck/scriptFormats.d.ts"],
+      "@/lib/scriptDoc": ["./types/typecheck/scriptDoc.d.ts"],
+      "@/lib/types/assets": ["./types/typecheck/assets-types.d.ts"],
+      "@/lib/db/schema": ["./types/typecheck/db-schema.d.ts"],
+      "@/lib/db/client": ["./types/typecheck/db-client.d.ts"],
+      "@/lib/db/mocks": ["./types/typecheck/db-mocks.d.ts"],
+      "@/lib/db/config": ["./types/typecheck/db-config.d.ts"],
+      "@/lib/notifications.server": ["./types/typecheck/notifications.server.d.ts"],
+      "@/lib/storage": ["./types/typecheck/storage.d.ts"],
+      "@/lib/observability": ["./types/typecheck/observability.d.ts"],
+      "@/lib/exports": ["./types/typecheck/exports.d.ts"],
+      "@/lib/exports/types": ["./types/typecheck/exports-types.d.ts"]
+    }
+  },
+  "include": [
+    "src/app/api/request-access/**/*",
+    "src/app/api/assets/**/*",
+    "src/app/api/exports/**/*",
+    "src/app/api/projects/[id]/export/**/*",
+    "src/lib/observability.ts",
+    "src/lib/exports/index.ts",
+    "src/lib/exports/types.ts",
+    "src/app/api/request-access/route.test.ts",
+    "src/app/api/assets/route.test.ts",
+    "src/app/api/exports/[jobId]/route.test.ts"
+  ],
+  "exclude": ["node_modules"]
+}
