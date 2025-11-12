@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient,
+  type PostgrestError,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL?.trim();
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
@@ -189,6 +193,37 @@ type SupabaseAccessRequestRow = {
 
 let cachedSupabaseClient: SupabaseClient | null = null;
 
+type SupabaseResponseError = PostgrestError & { status?: number };
+
+const SUPABASE_READ_ACCESS_ERROR_CODES = new Set([
+  "42501",
+  "PGRST301",
+  "PGRST302",
+]);
+
+function isSupabaseReadAccessError(
+  error: SupabaseResponseError | null,
+): error is SupabaseResponseError {
+  if (!error) {
+    return false;
+  }
+
+  const code = error.code?.toUpperCase();
+  if (code && SUPABASE_READ_ACCESS_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  const message = (error.message ?? "").toLowerCase();
+  const details = (typeof error.details === "string" ? error.details : "").toLowerCase();
+
+  return (
+    message.includes("permission denied") ||
+    message.includes("violates row-level security policy") ||
+    details.includes("permission denied") ||
+    details.includes("violates row-level security policy")
+  );
+}
+
 function resolveSupabaseKey(): string | undefined {
   return SUPABASE_SERVICE_ROLE_KEY || SUPABASE_GENERIC_KEY;
 }
@@ -263,9 +298,14 @@ const supabasePersistence: AccessRequestPersistence = {
       .limit(1);
 
     if (error) {
+      const responseError = error as SupabaseResponseError;
+      if (isSupabaseReadAccessError(responseError)) {
+        return false;
+      }
+
       throw new AccessRequestError(
-        error.message ?? "Failed to query access requests from Supabase.",
-        error.status ?? 500,
+        responseError.message ?? "Failed to query access requests from Supabase.",
+        responseError.status ?? 500,
       );
     }
 
