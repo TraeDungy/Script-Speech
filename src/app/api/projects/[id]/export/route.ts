@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getExportQueue, type ScriptDoc } from "@/lib/exports";
+import { enqueueExportJob, type ScriptDoc } from "@/lib/exports";
 import type { ExportFormat } from "@/lib/exports/types";
 
 interface RequestBody {
@@ -36,5 +36,12 @@ export async function POST(
     deliverToEmail: body.deliverToEmail?.trim() || undefined,
   });
 
-  return NextResponse.json(job, { status: 202 });
+    return NextResponse.json(job, { status: 202 });
+  } catch (error) {
+    console.error("Failed to enqueue export job", error);
+    return NextResponse.json(
+      { error: "Failed to enqueue export job" },
+      { status: 500 },
+    );
+  }
 }

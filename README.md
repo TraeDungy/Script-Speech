@@ -15,7 +15,7 @@ Visit `http://localhost:3000` to explore the voice-first landing experience.
 
 The application now auto-detects a Supabase backend for durable storage. To enable it:
 
-1. Create a Supabase project and execute [`docs/supabase/access-requests-table.sql`](docs/supabase/access-requests-table.sql) to provision the `access_requests` table.
+1. Create a Supabase project and execute both [`docs/supabase/access-requests-table.sql`](docs/supabase/access-requests-table.sql) and [`docs/supabase/export-jobs-table.sql`](docs/supabase/export-jobs-table.sql) to provision the `access_requests` and `export_jobs` tables.
 2. Add the following environment variables to your `.env.local` (or hosting provider secrets):
 
    ```bash
