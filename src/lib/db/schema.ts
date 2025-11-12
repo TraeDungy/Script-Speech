@@ -85,13 +85,9 @@ export interface ExportJobRow {
   updated_at: string;
 }
 
-export interface AuditLogRow {
-  id: string;
-  action: string;
-  user_id: string;
-  project_id: string | null;
-  target_id: string | null;
-  details: string | null;
-  severity: "info" | "high";
+export interface MarketingContentRow<T = unknown> {
+  slug: string;
+  data: T;
   created_at: string;
+  updated_at: string;
 }
