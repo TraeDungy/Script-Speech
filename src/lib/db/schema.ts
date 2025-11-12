@@ -17,6 +17,17 @@ export interface ProjectRow {
   target_length_value: number | null;
 }
 
+export interface ProjectMemberRow {
+  id: string;
+  project_id: string;
+  user_id: string;
+  role: "owner" | "editor" | "member" | "viewer" | "admin";
+  invited_at: string | null;
+  joined_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ScriptDocRow {
   id: string;
   project_id: string;
@@ -72,4 +83,15 @@ export interface ExportJobRow {
   error: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface AuditLogRow {
+  id: string;
+  action: string;
+  user_id: string;
+  project_id: string | null;
+  target_id: string | null;
+  details: string | null;
+  severity: "info" | "high";
+  created_at: string;
 }

@@ -73,6 +73,7 @@ export class ExportQueue {
       this.processJob(job.id, payload).catch((error) => {
         console.error("Export job failed", error);
       });
+    }, 0);
 
     return job;
   }
@@ -609,5 +610,26 @@ function getLocalExportQueue(): LocalExportQueue {
     globalRef.__scriptSpeechLocalExportQueue = new LocalExportQueue();
   }
   return globalRef.__scriptSpeechLocalExportQueue;
+}
+
+let sharedQueue: ExportQueue | LocalExportQueue | null = null;
+
+export function getExportQueue(): ExportQueue | LocalExportQueue {
+  if (sharedQueue) {
+    return sharedQueue;
+  }
+
+  sharedQueue = isSupabaseConfigured() ? new ExportQueue() : getLocalExportQueue();
+  return sharedQueue;
+}
+
+export async function enqueueExportJob(payload: EnqueuePayload): Promise<ExportJob> {
+  const queue = getExportQueue();
+  return queue.enqueue(payload);
+}
+
+export async function getExportJob(jobId: string): Promise<ExportJob | null> {
+  const queue = getExportQueue();
+  return queue.getJob(jobId);
 }
 
