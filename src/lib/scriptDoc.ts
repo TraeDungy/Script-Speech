@@ -30,6 +30,14 @@ export interface ScriptDocRelatedProject {
   notes?: string;
 }
 
+export interface ScriptDocTranscriptEntry {
+  id: string;
+  role: string;
+  text: string;
+  final: boolean;
+  createdAt: string;
+}
+
 export interface ScriptDocConceptAnalysis {
   conceptSummary: string;
   keywords: string[];
@@ -48,6 +56,7 @@ export interface ScriptDocConceptAnalysis {
   relatedProjects: ScriptDocRelatedProject[];
   isFranchiseExtension: boolean;
   extensionNotes?: string;
+  conversationLog?: ScriptDocTranscriptEntry[];
 }
 
 export type ScriptReferenceSource = "upload" | "link";
