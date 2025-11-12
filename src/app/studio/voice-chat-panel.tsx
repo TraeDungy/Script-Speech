@@ -43,9 +43,8 @@ function extractTextFromContent(content: unknown): string {
     }
 
     if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (trimmed) {
-        fragments.push(trimmed);
+      if (value.length > 0) {
+        fragments.push(value);
       }
       return;
     }
@@ -77,7 +76,7 @@ function extractTextFromContent(content: unknown): string {
   };
 
   visit(content);
-  return fragments.join("").trim();
+  return fragments.join("");
 }
 
 export function VoiceChatPanel() {
@@ -129,11 +128,16 @@ export function VoiceChatPanel() {
           const next = [...previous];
           const index = next.findIndex((message) => message.id === id);
           const resolvedRole = role ? formatRole(role) : undefined;
-          const trimmedText = text?.trim();
+          const normalizedText = typeof text === "string" ? text : undefined;
 
           if (index >= 0) {
             const existing = next[index];
-            const newText = trimmedText ? (append ? `${existing.text}${trimmedText}` : trimmedText) : existing.text;
+            const newText =
+              normalizedText !== undefined
+                ? append
+                  ? `${existing.text}${normalizedText}`
+                  : normalizedText
+                : existing.text;
 
             next[index] = {
               ...existing,
@@ -142,11 +146,11 @@ export function VoiceChatPanel() {
               final: final ?? existing.final,
               updatedAt: Date.now(),
             };
-          } else if (trimmedText) {
+          } else if (typeof normalizedText === "string" && normalizedText.length > 0) {
             next.push({
               id,
               role: resolvedRole ?? formatRole(role),
-              text: trimmedText,
+              text: normalizedText,
               final: Boolean(final),
               updatedAt: Date.now(),
             });
