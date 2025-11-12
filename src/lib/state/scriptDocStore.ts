@@ -7,6 +7,7 @@ import {
   ScriptDocBeat,
   ScriptScene,
   ScriptSceneElement,
+  type ScriptDocTranscriptEntry,
 } from "@/lib/scriptDoc";
 
 type ScriptDocHistoryState = {
@@ -33,6 +34,9 @@ export interface ScriptDocStore extends ScriptDocHistoryState {
   updateConceptAnalysis: (
     updater: (analysis: ScriptDoc["conceptAnalysis"]) => void,
   ) => void;
+  applyPatch: (patch: Partial<ScriptDoc>) => void;
+  appendTranscriptTurn: (turn: ScriptDocTranscriptEntry) => void;
+  loadTranscriptLog: (turns: ScriptDocTranscriptEntry[]) => void;
   undo: () => void;
   redo: () => void;
 }
@@ -41,6 +45,35 @@ const structuredCloneDoc = (doc: ScriptDoc): ScriptDoc =>
   typeof structuredClone === "function"
     ? structuredClone(doc)
     : JSON.parse(JSON.stringify(doc)) as ScriptDoc;
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && Object.getPrototypeOf(value) === Object.prototype;
+
+const deepMerge = (target: unknown, patch: unknown): unknown => {
+  if (Array.isArray(target) && Array.isArray(patch)) {
+    return patch;
+  }
+
+  if (isPlainObject(target) && isPlainObject(patch)) {
+    const result: Record<string, unknown> = { ...target };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) {
+        continue;
+      }
+
+      result[key] = key in result ? deepMerge(result[key], value) : value;
+    }
+    return result;
+  }
+
+  return patch;
+};
+
+const mergeScriptDocPatch = (doc: ScriptDoc, patch: Partial<ScriptDoc>): ScriptDoc => {
+  const merged = deepMerge(structuredCloneDoc(doc), patch) as ScriptDoc;
+  ensureOrder(merged);
+  return merged;
+};
 
 const applyOrder = <T extends { order: number }>(items: T[]) => {
   items.forEach((item, index) => {
@@ -373,13 +406,14 @@ const initialDoc: ScriptDoc = {
     isFranchiseExtension: true,
     extensionNotes:
       "Expands the Reyes family universe established in the short doc, bridging into feature territory.",
+    conversationLog: [],
   },
 };
 
-const ensureOrder = (doc: ScriptDoc) => {
+function ensureOrder(doc: ScriptDoc) {
   applyOrder(doc.beats);
   applyOrder(doc.scenes);
-};
+}
 
 ensureOrder(initialDoc);
 
@@ -553,6 +587,53 @@ export const useScriptDocStore = create<ScriptDocStore>((set, get) => ({
       future: [],
       hasUndo: true,
       hasRedo: false,
+    });
+  },
+  applyPatch: (patch) => {
+    const state = get();
+    const merged = mergeScriptDocPatch(state.doc, patch);
+    set({
+      doc: merged,
+      past: state.past,
+      future: state.future,
+      hasUndo: state.hasUndo,
+      hasRedo: state.hasRedo,
+    });
+  },
+  appendTranscriptTurn: (turn) => {
+    const state = get();
+    const draft = structuredCloneDoc(state.doc);
+    const log = Array.isArray(draft.conceptAnalysis.conversationLog)
+      ? [...draft.conceptAnalysis.conversationLog]
+      : [];
+    const index = log.findIndex((entry) => entry.id === turn.id);
+    if (index >= 0) {
+      log[index] = { ...log[index], ...turn };
+    } else {
+      log.push({ ...turn });
+    }
+    log.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    draft.conceptAnalysis.conversationLog = log;
+    set({
+      doc: draft,
+      past: state.past,
+      future: state.future,
+      hasUndo: state.hasUndo,
+      hasRedo: state.hasRedo,
+    });
+  },
+  loadTranscriptLog: (turns) => {
+    const state = get();
+    const draft = structuredCloneDoc(state.doc);
+    draft.conceptAnalysis.conversationLog = [...turns].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
+    set({
+      doc: draft,
+      past: state.past,
+      future: state.future,
+      hasUndo: state.hasUndo,
+      hasRedo: state.hasRedo,
     });
   },
   undo: () => {
