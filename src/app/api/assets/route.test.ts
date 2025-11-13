@@ -9,6 +9,7 @@ const assetModule = vi.hoisted(() => ({
   createReferenceAsset: vi.fn(),
   recordAssetBinary: vi.fn(),
   updateReferenceAsset: vi.fn(),
+  updateReferenceAssetLifecycle: vi.fn(),
   serializeReferenceAsset: (asset: unknown) => asset,
 }));
 
@@ -24,6 +25,7 @@ const mockGetReferenceAsset = assetModule.getReferenceAsset;
 const mockCreateReferenceAsset = assetModule.createReferenceAsset;
 const mockRecordAssetBinary = assetModule.recordAssetBinary;
 const mockUpdateReferenceAsset = assetModule.updateReferenceAsset;
+const mockUpdateReferenceAssetLifecycle = assetModule.updateReferenceAssetLifecycle;
 const mockGetStorageProvider = storageModule.getStorageProvider;
 
 const observabilityModule = vi.hoisted(() => ({
@@ -96,7 +98,11 @@ describe("/api/assets", () => {
   });
 
   it("uploads binary data for an asset", async () => {
-    mockGetReferenceAsset.mockResolvedValueOnce({ id: "asset-2", contentType: "image/png" });
+    mockGetReferenceAsset.mockResolvedValueOnce({
+      id: "asset-2",
+      projectId: null,
+      contentType: "image/png",
+    });
     mockRecordAssetBinary.mockResolvedValueOnce({ id: "asset-2", contentType: "image/jpeg" });
 
     const request = new NextRequest("http://localhost/api/assets?assetId=asset-2", {
@@ -108,6 +114,45 @@ describe("/api/assets", () => {
     const response = await PUT(request);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ asset: { id: "asset-2", contentType: "image/jpeg" } });
+  });
+
+  it("updates asset lifecycle when receiving JSON payload", async () => {
+    mockGetReferenceAsset.mockResolvedValueOnce({
+      id: "asset-4",
+      projectId: "p1",
+      contentType: "image/png",
+    });
+    mockUpdateReferenceAssetLifecycle.mockResolvedValueOnce({
+      id: "asset-4",
+      status: "processing",
+    });
+
+    const request = new NextRequest("http://localhost/api/assets?assetId=asset-4", {
+      method: "PUT",
+      body: JSON.stringify({
+        statusUpdates: {
+          status: "processing",
+          processingProgress: 50,
+        },
+      }),
+      headers: { "content-type": "application/json" },
+    });
+
+    const response = await PUT(request);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ asset: { id: "asset-4", status: "processing" } });
+    expect(mockUpdateReferenceAssetLifecycle).toHaveBeenCalledWith("asset-4", {
+      status: "processing",
+      scanStatus: undefined,
+      transcodeStatus: undefined,
+      processingProgress: 50,
+      failureCode: null,
+      failureMessage: null,
+      contentType: undefined,
+      size: undefined,
+      url: undefined,
+      thumbnailUrl: undefined,
+    });
   });
 
   it("updates asset metadata", async () => {

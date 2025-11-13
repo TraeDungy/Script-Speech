@@ -1,6 +1,22 @@
 export type AssetSourceType = "upload" | "external";
 
-export type AssetStatus = "pending" | "ready";
+export type AssetStatus =
+  | "pending"
+  | "uploading"
+  | "scanning"
+  | "processing"
+  | "ready"
+  | "failed"
+  | "quarantined";
+
+export type AssetScanStatus = "pending" | "clean" | "infected" | "error";
+
+export type AssetTranscodeStatus =
+  | "pending"
+  | "queued"
+  | "processing"
+  | "ready"
+  | "error";
 
 export interface ReferenceAsset {
   id: string;
@@ -15,6 +31,11 @@ export interface ReferenceAsset {
   size: number;
   tags: string[];
   status: AssetStatus;
+  scanStatus: AssetScanStatus;
+  transcodeStatus: AssetTranscodeStatus;
+  processingProgress: number | null;
+  failureCode?: string | null;
+  failureMessage?: string | null;
   createdAt: string;
   updatedAt: string;
   attribution?: string | null;

@@ -2,6 +2,9 @@ import type { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 
 import type {
+  AssetScanStatus,
+  AssetStatus,
+  AssetTranscodeStatus,
   CreateEntityAssetInput,
   CreateReferenceAssetInput,
   EntityAsset,
@@ -35,6 +38,11 @@ function mapReferenceAssetRow(row: ReferenceAssetRow): ReferenceAsset {
     size: row.size,
     tags: row.tags ?? [],
     status: row.status,
+    scanStatus: row.scan_status,
+    transcodeStatus: row.transcode_status,
+    processingProgress: row.processing_progress,
+    failureCode: row.failure_code,
+    failureMessage: row.failure_message,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     attribution: row.attribution,
@@ -123,6 +131,15 @@ export async function insertReferenceAsset(
     size: input.size,
     tags: input.tags ?? [],
     status: "pending" as ReferenceAssetRow["status"],
+    scan_status: "pending" as ReferenceAssetRow["scan_status"],
+    transcode_status:
+      (input.sourceType ?? (input.url ? "external" : "upload")) === "external"
+        ? "ready"
+        : ("pending" as ReferenceAssetRow["transcode_status"]),
+    processing_progress:
+      (input.sourceType ?? (input.url ? "external" : "upload")) === "external" ? 100 : 0,
+    failure_code: null as string | null,
+    failure_message: null as string | null,
     attribution: input.attribution ?? null,
   };
 
@@ -157,6 +174,11 @@ export async function modifyReferenceAsset(
     preview_color: updates.previewColor ?? null,
     tags: updates.tags,
     status: updates.status,
+    scan_status: updates.scanStatus,
+    transcode_status: updates.transcodeStatus,
+    processing_progress: updates.processingProgress ?? null,
+    failure_code: updates.failureCode ?? null,
+    failure_message: updates.failureMessage ?? null,
     attribution: updates.attribution ?? null,
   };
 
@@ -193,8 +215,13 @@ export async function persistAssetBinary(
       url: encoded,
       thumbnail_url: encoded,
       status: "ready",
+      scan_status: "clean",
+      transcode_status: "ready",
+      processing_progress: 100,
       content_type: contentType,
       size: data.byteLength,
+      failure_code: null,
+      failure_message: null,
     })
     .eq("id", assetId)
     .select("*")
@@ -208,17 +235,30 @@ export async function persistAssetBinary(
   return row ? mapReferenceAssetRow(row) : null;
 }
 
-export async function fetchEntityAssets(projectId: string): Promise<EntityAsset[]> {
+export async function fetchEntityAssets(
+  projectId: string,
+  options?: { includePrivate?: boolean },
+): Promise<EntityAsset[]> {
   if (!isSupabaseConfigured()) {
-    return listMockEntityAssets(projectId);
+    const assets = listMockEntityAssets(projectId);
+    if (options?.includePrivate) {
+      return assets;
+    }
+    return assets.filter((asset) => !asset.isPrivate);
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from<EntityAssetRow>("entity_assets")
     .select("*")
     .eq("project_id", projectId)
     .order("order", { ascending: true });
+
+  if (!options?.includePrivate) {
+    query = query.eq("is_private", false);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("Failed to load entity assets", error);
@@ -226,6 +266,138 @@ export async function fetchEntityAssets(projectId: string): Promise<EntityAsset[
   }
 
   return (data ?? []).map(mapEntityAssetRow);
+}
+
+export async function updateReferenceAssetStatus(
+  assetId: string,
+  status: Partial<{
+    status: AssetStatus;
+    scanStatus: AssetScanStatus;
+    transcodeStatus: AssetTranscodeStatus;
+    processingProgress: number | null;
+    failureCode: string | null;
+    failureMessage: string | null;
+    contentType: string;
+    size: number;
+    url: string | null;
+    thumbnailUrl: string | null;
+  }>,
+): Promise<ReferenceAsset | null> {
+  if (!isSupabaseConfigured()) {
+    return updateMockReferenceAsset(assetId, {
+      ...("url" in status ? { url: status.url ?? "" } : {}),
+      ...("thumbnailUrl" in status ? { thumbnailUrl: status.thumbnailUrl ?? null } : {}),
+      ...status,
+    }) ?? null;
+  }
+
+  const supabase = getSupabaseClient();
+  const payload: Partial<ReferenceAssetRow> = {};
+
+  if (typeof status.status !== "undefined") {
+    payload.status = status.status;
+  }
+  if (typeof status.scanStatus !== "undefined") {
+    payload.scan_status = status.scanStatus;
+  }
+  if (typeof status.transcodeStatus !== "undefined") {
+    payload.transcode_status = status.transcodeStatus;
+  }
+  if (Object.prototype.hasOwnProperty.call(status, "processingProgress")) {
+    payload.processing_progress = status.processingProgress ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(status, "failureCode")) {
+    payload.failure_code = status.failureCode ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(status, "failureMessage")) {
+    payload.failure_message = status.failureMessage ?? null;
+  }
+  if (typeof status.contentType !== "undefined") {
+    payload.content_type = status.contentType;
+  }
+  if (typeof status.size !== "undefined") {
+    payload.size = status.size;
+  }
+  if (Object.prototype.hasOwnProperty.call(status, "url")) {
+    payload.url = status.url ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(status, "thumbnailUrl")) {
+    payload.thumbnail_url = status.thumbnailUrl ?? null;
+  }
+
+  const { data, error } = await supabase
+    .from<ReferenceAssetRow>("reference_assets")
+    .update(payload)
+    .eq("id", assetId)
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("Failed to update reference asset status", error);
+    throw error;
+  }
+
+  return data ? mapReferenceAssetRow(data) : null;
+}
+
+export async function searchReferenceAssets(options: {
+  projectId?: string | null;
+  query?: string | null;
+  tags?: string[];
+  includePrivate?: boolean;
+}): Promise<ReferenceAsset[]> {
+  if (!isSupabaseConfigured()) {
+    const results = listMockReferenceAssets(options.projectId);
+    const filtered = results.filter((asset) => {
+      if (options.query) {
+        const q = options.query.toLowerCase();
+        if (
+          !asset.name.toLowerCase().includes(q) &&
+          !(asset.description ?? "").toLowerCase().includes(q) &&
+          !asset.tags.some((tag) => tag.toLowerCase().includes(q))
+        ) {
+          return false;
+        }
+      }
+      if (options.tags?.length) {
+        return options.tags.every((tag) => asset.tags.includes(tag));
+      }
+      return true;
+    });
+    return filtered;
+  }
+
+  const supabase = getSupabaseClient();
+  let queryBuilder = supabase
+    .from<ReferenceAssetRow>("reference_assets")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (options.projectId) {
+    queryBuilder = queryBuilder.or(
+      `project_id.eq.${options.projectId},project_id.is.null`,
+    );
+  }
+
+  if (options.query) {
+    const q = options.query;
+    queryBuilder = queryBuilder.or(
+      `name.ilike.%${q}%,description.ilike.%${q}%,tags.cs.{${q}}`,
+    );
+  }
+
+  if (options.tags?.length) {
+    queryBuilder = queryBuilder.contains("tags", options.tags);
+  }
+
+  const { data, error } = await queryBuilder;
+
+  if (error) {
+    console.error("Failed to search reference assets", error);
+    throw error;
+  }
+
+  return (data ?? []).map(mapReferenceAssetRow);
 }
 
 export async function upsertEntityAssetRecord(

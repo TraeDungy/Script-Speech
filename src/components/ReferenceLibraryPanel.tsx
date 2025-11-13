@@ -37,6 +37,13 @@ export function ReferenceLibraryPanel({
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState<UploadingState>({});
   const [selection, setSelection] = useState<SelectionMap>({});
+  const [privacySelection, setPrivacySelection] = useState<Record<string, boolean>>({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTag, setSelectedTag] = useState("");
+  const [searchResults, setSearchResults] = useState<ReferenceAsset[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [includePrivateLinks, setIncludePrivateLinks] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -44,7 +51,9 @@ export function ReferenceLibraryPanel({
 
     async function load() {
       try {
-        const response = await fetch(`/api/projects/${projectId}/assets`);
+        const response = await fetch(
+          `/api/projects/${projectId}/assets?includePrivate=${includePrivateLinks}`
+        );
         if (!response.ok) {
           throw new Error("Unable to load assets");
         }
@@ -65,15 +74,77 @@ export function ReferenceLibraryPanel({
     return () => {
       cancelled = true;
     };
-  }, [projectId, setEntityAssets, setReferenceAssets]);
+  }, [projectId, includePrivateLinks, setEntityAssets, setReferenceAssets]);
 
   useEffect(() => {
     const nextSelection: SelectionMap = {};
+    const nextPrivacy: Record<string, boolean> = {};
     entityAssets.forEach((link) => {
       nextSelection[link.assetId] = `${link.entityType}:${link.entityId}`;
+      nextPrivacy[link.assetId] = link.isPrivate;
     });
     setSelection(nextSelection);
+    setPrivacySelection(nextPrivacy);
   }, [entityAssets]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    if (!searchQuery && !selectedTag) {
+      setSearchResults(null);
+      setSearching(false);
+      setSearchError(null);
+      return () => {
+        controller.abort();
+      };
+    }
+
+    setSearching(true);
+    setSearchError(null);
+
+    const timeout = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams();
+        params.set("projectId", projectId);
+        if (searchQuery) {
+          params.set("q", searchQuery);
+        }
+        if (selectedTag) {
+          params.set("tags", selectedTag);
+        }
+        if (includePrivateLinks) {
+          params.set("includePrivate", "true");
+        }
+        const response = await fetch(`/api/assets/search?${params.toString()}`, {
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error("Unable to search assets");
+        }
+        const payload = await response.json();
+        if (!cancelled) {
+          setSearchResults(payload.assets ?? []);
+          setSearching(false);
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        if ((err as Error).name === "AbortError") {
+          return;
+        }
+        setSearching(false);
+        setSearchError(err instanceof Error ? err.message : "Search failed");
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timeout);
+    };
+  }, [projectId, searchQuery, selectedTag, includePrivateLinks]);
 
   const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -130,6 +201,25 @@ export function ReferenceLibraryPanel({
           upsertReferenceAsset(asset);
           setUploading((current) => ({ ...current, [asset.id]: true }));
 
+          const isLocalUpload = uploadInfo.uploadUrl.startsWith("/api/assets");
+
+          if (!isLocalUpload) {
+            try {
+              await fetch(`/api/assets?assetId=${asset.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  statusUpdates: {
+                    status: "uploading",
+                    processingProgress: 0
+                  }
+                })
+              });
+            } catch (err) {
+              console.warn("Failed to mark asset as uploading", err);
+            }
+          }
+
           const uploadResponse = await fetch(uploadInfo.uploadUrl, {
             method: uploadInfo.method,
             headers: uploadInfo.headers,
@@ -140,9 +230,22 @@ export function ReferenceLibraryPanel({
             throw new Error("Upload failed");
           }
 
-          const uploadPayload = await uploadResponse.json();
-          const updated: ReferenceAsset = uploadPayload.asset;
-          upsertReferenceAsset(updated);
+          let updated: ReferenceAsset | null = null;
+
+          if (uploadInfo.uploadUrl.startsWith("/api/assets")) {
+            const uploadPayload = await uploadResponse.json();
+            updated = uploadPayload.asset as ReferenceAsset;
+          } else {
+            const refreshResponse = await fetch(`/api/assets?assetId=${asset.id}`);
+            if (refreshResponse.ok) {
+              const refreshPayload = await refreshResponse.json();
+              updated = refreshPayload.asset as ReferenceAsset;
+            }
+          }
+
+          if (updated) {
+            upsertReferenceAsset(updated);
+          }
         } catch (err) {
           setError(err instanceof Error ? err.message : "Upload failed");
         } finally {
@@ -167,11 +270,11 @@ export function ReferenceLibraryPanel({
   );
 
   const entityIndex = useMemo(() => {
-    const map = new Map<string, string[]>();
+    const map = new Map<string, Array<{ type: string; entityId: string; isPrivate: boolean }>>();
     entityAssets.forEach((asset) => {
       const key = asset.assetId;
       const current = map.get(key) ?? [];
-      current.push(`${asset.entityType}:${asset.entityId}`);
+      current.push({ type: asset.entityType, entityId: asset.entityId, isPrivate: asset.isPrivate });
       map.set(key, current);
     });
     return map;
@@ -188,7 +291,12 @@ export function ReferenceLibraryPanel({
         const response = await fetch(`/api/projects/${projectId}/assets`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ assetId, entityType, entityId })
+          body: JSON.stringify({
+            assetId,
+            entityType,
+            entityId,
+            isPrivate: privacySelection[assetId] ?? false
+          })
         });
 
         if (!response.ok) {
@@ -198,17 +306,93 @@ export function ReferenceLibraryPanel({
         const payload = await response.json();
         upsertEntityAsset(payload.asset);
         setSelection((current) => ({ ...current, [assetId]: value }));
+        setPrivacySelection((current) => ({
+          ...current,
+          [assetId]: payload.asset.isPrivate ?? false
+        }));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unable to tag asset");
       }
     },
-    [projectId, upsertEntityAsset]
+    [privacySelection, projectId, upsertEntityAsset]
   );
+
+  const handlePrivacyToggle = useCallback(
+    async (assetId: string, value: boolean) => {
+      setPrivacySelection((current) => ({ ...current, [assetId]: value }));
+      const selected = selection[assetId];
+      if (!selected) {
+        return;
+      }
+
+      const [entityType, entityId] = selected.split(":");
+      try {
+        const response = await fetch(`/api/projects/${projectId}/assets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assetId, entityType, entityId, isPrivate: value })
+        });
+
+        if (!response.ok) {
+          throw new Error("Unable to update privacy");
+        }
+
+        const payload = await response.json();
+        upsertEntityAsset(payload.asset);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to update privacy");
+      }
+    },
+    [projectId, selection, upsertEntityAsset]
+  );
+
+  const availableTags = useMemo(() => {
+    const tags = new Set<string>();
+    (searchResults ?? referenceAssets).forEach((item) => {
+      item.tags.forEach((tag) => tags.add(tag));
+    });
+    return Array.from(tags).sort((a, b) => a.localeCompare(b));
+  }, [referenceAssets, searchResults]);
+
+  const displayedAssets = searchResults ?? referenceAssets;
+
+  const renderStatusLabel = (asset: ReferenceAsset) => {
+    if (asset.status === "ready") {
+      return "Ready";
+    }
+    if (asset.status === "processing") {
+      if (asset.transcodeStatus === "processing") {
+        return "Transcoding";
+      }
+      if (asset.scanStatus === "clean") {
+        return "Processing";
+      }
+      return "Awaiting processing";
+    }
+    if (asset.status === "scanning") {
+      return "Scanning";
+    }
+    if (asset.status === "uploading") {
+      return "Uploading";
+    }
+    if (asset.status === "failed") {
+      return "Failed";
+    }
+    if (asset.status === "quarantined") {
+      return "Quarantined";
+    }
+    return "Pending";
+  };
 
   const renderAssetCard = (asset: ReferenceAsset) => {
     const isUploading = uploading[asset.id];
     const linkedTargets = entityIndex.get(asset.id) ?? [];
     const accessibleLabel = `${asset.name} asset thumbnail`;
+    const statusLabel = renderStatusLabel(asset);
+    const showProgress =
+      typeof asset.processingProgress === "number" &&
+      asset.processingProgress > 0 &&
+      asset.processingProgress < 100;
 
     return (
       <div
@@ -231,7 +415,7 @@ export function ReferenceLibraryPanel({
             <p className="text-xs text-white/80">
               {asset.contentType} · {Math.round(asset.size / 1024)} KB
             </p>
-            <p className="text-xs uppercase tracking-[0.2em] text-white/70">{asset.status}</p>
+            <p className="text-xs uppercase tracking-[0.2em] text-white/70">{statusLabel}</p>
           </div>
           {isUploading ? (
             <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-xs font-semibold uppercase tracking-widest text-white">
@@ -239,19 +423,28 @@ export function ReferenceLibraryPanel({
             </div>
           ) : null}
         </div>
+        {showProgress ? (
+          <div className="h-1 overflow-hidden rounded-full bg-slate-200/60 dark:bg-white/10">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+              style={{ width: `${Math.min(100, Math.max(0, asset.processingProgress ?? 0))}%` }}
+            />
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2 text-xs">
           {linkedTargets.map((target) => {
-            const [type, entityId] = target.split(":");
+            const { type, entityId, isPrivate: targetPrivate } = target;
             const label =
               type === "beat"
                 ? beats.find((beat) => beat.id === entityId)?.title ?? entityId
                 : scenes.find((scene) => scene.id === entityId)?.title ?? entityId;
             return (
               <span
-                key={`${asset.id}-${target}`}
-                className="rounded-full border border-white/20 bg-white/60 px-3 py-1 font-medium uppercase tracking-widest text-slate-900 backdrop-blur-xs dark:border-white/10 dark:bg-white/10 dark:text-vs-accent"
+                key={`${asset.id}-${type}-${entityId}`}
+                className="flex items-center gap-1 rounded-full border border-white/20 bg-white/60 px-3 py-1 font-medium uppercase tracking-widest text-slate-900 backdrop-blur-xs dark:border-white/10 dark:bg-white/10 dark:text-vs-accent"
               >
                 {type === "beat" ? "Beat" : "Scene"}: {label}
+                {targetPrivate ? <span aria-label="Private" title="Private" className="text-xs">🔒</span> : null}
               </span>
             );
           })}
@@ -280,6 +473,16 @@ export function ReferenceLibraryPanel({
             </optgroup>
           </select>
         </label>
+        <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-slate-700 dark:text-vs-accent-strong">
+          <input
+            type="checkbox"
+            className="h-3 w-3 rounded border border-slate-400 text-slate-600 focus:ring-slate-500 dark:border-white/40 dark:bg-black"
+            checked={privacySelection[asset.id] ?? false}
+            onChange={(event) => handlePrivacyToggle(asset.id, event.target.checked)}
+            disabled={!selection[asset.id]}
+          />
+          Private link
+        </label>
       </div>
     );
   };
@@ -297,6 +500,42 @@ export function ReferenceLibraryPanel({
         <p className="text-sm text-slate-600 dark:text-vs-accent-strong/80">
           Drop reference images or videos to keep beats and scenes grounded in shared visuals.
         </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search assets"
+            className="w-full max-w-xs rounded-xl border border-white/20 bg-white/80 px-3 py-2 text-sm text-slate-900 shadow-inner outline-none transition focus:border-slate-400 dark:border-white/10 dark:bg-black/40 dark:text-vs-accent"
+          />
+          <select
+            value={selectedTag}
+            onChange={(event) => setSelectedTag(event.target.value)}
+            className="w-full max-w-[180px] rounded-xl border border-white/20 bg-white/80 px-3 py-2 text-sm text-slate-900 shadow-inner outline-none transition focus:border-slate-400 dark:border-white/10 dark:bg-black/40 dark:text-vs-accent"
+          >
+            <option value="">All tags</option>
+            {availableTags.map((tag) => (
+              <option key={tag} value={tag}>
+                #{tag}
+              </option>
+            ))}
+          </select>
+          <label className="flex items-center gap-2 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-slate-600 dark:text-vs-accent-strong/70">
+            <input
+              type="checkbox"
+              className="h-3 w-3 rounded border border-slate-400 text-slate-600 focus:ring-slate-500 dark:border-white/40 dark:bg-black"
+              checked={includePrivateLinks}
+              onChange={(event) => setIncludePrivateLinks(event.target.checked)}
+            />
+            Show private links
+          </label>
+        </div>
+        {searching ? (
+          <p className="text-xs text-slate-500 dark:text-vs-accent-strong/70">Searching…</p>
+        ) : null}
+        {searchError ? (
+          <p className="text-xs text-red-600 dark:text-red-300">{searchError}</p>
+        ) : null}
       </header>
       <div
         className={`flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-slate-400/40 bg-white/70 p-8 text-center text-slate-700 transition dark:border-white/20 dark:bg-black/30 dark:text-vs-accent ${
@@ -341,7 +580,7 @@ export function ReferenceLibraryPanel({
         </p>
       ) : null}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {referenceAssets.length ? referenceAssets.map(renderAssetCard) : (
+        {displayedAssets.length ? displayedAssets.map(renderAssetCard) : (
           <p className="rounded-2xl border border-white/10 bg-white/60 p-6 text-sm text-slate-600 backdrop-blur-xs dark:border-white/5 dark:bg-black/40 dark:text-vs-accent-strong/70">
             No reference assets yet. Upload files to build your shared palette.
           </p>

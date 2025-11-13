@@ -6,8 +6,10 @@ import {
   fetchReferenceAssets,
   insertReferenceAsset,
   modifyReferenceAsset,
+  searchReferenceAssets,
   persistAssetBinary,
   upsertEntityAssetRecord,
+  updateReferenceAssetStatus,
 } from "@/lib/db/assets";
 import type {
   CreateEntityAssetInput,
@@ -51,6 +53,13 @@ export async function updateReferenceAsset(
   return modifyReferenceAsset(assetId, updates);
 }
 
+export async function updateReferenceAssetLifecycle(
+  assetId: string,
+  updates: Parameters<typeof updateReferenceAssetStatus>[1],
+): Promise<ReferenceAsset | null> {
+  return updateReferenceAssetStatus(assetId, updates);
+}
+
 export async function recordAssetBinary(
   assetId: string,
   data: Buffer,
@@ -59,14 +68,26 @@ export async function recordAssetBinary(
   return persistAssetBinary(assetId, data, contentType);
 }
 
-export async function listEntityAssets(projectId: string): Promise<EntityAsset[]> {
-  return fetchEntityAssets(projectId);
+export async function listEntityAssets(
+  projectId: string,
+  options?: { includePrivate?: boolean },
+): Promise<EntityAsset[]> {
+  return fetchEntityAssets(projectId, options);
 }
 
 export async function upsertEntityAsset(
   input: CreateEntityAssetInput,
 ): Promise<EntityAsset> {
   return upsertEntityAssetRecord(input);
+}
+
+export async function searchAssets(options: {
+  projectId?: string | null;
+  query?: string | null;
+  tags?: string[];
+  includePrivate?: boolean;
+}): Promise<ReferenceAsset[]> {
+  return searchReferenceAssets(options);
 }
 
 export function serializeReferenceAsset(asset: ReferenceAsset) {

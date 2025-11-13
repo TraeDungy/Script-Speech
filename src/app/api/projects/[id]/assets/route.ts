@@ -22,12 +22,13 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   const projectId = params.id;
+  const includePrivate = request.nextUrl.searchParams.get("includePrivate") === "true";
   try {
     const { user } = await requireServerAuthSession();
     await ensureProjectMembership(projectId, user.id);
 
     const [assets, references] = await Promise.all([
-      listEntityAssets(projectId),
+      listEntityAssets(projectId, { includePrivate }),
       listReferenceAssets(projectId),
     ]);
 
