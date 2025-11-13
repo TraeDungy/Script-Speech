@@ -4,7 +4,8 @@ import type { User } from "@supabase/supabase-js";
 
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
 
-const ACCESS_TOKEN_COOKIE = "sb-access-token";
+export const ACCESS_TOKEN_COOKIE = "sb-access-token";
+export const REFRESH_TOKEN_COOKIE = "sb-refresh-token";
 const AUTHORIZATION_HEADER = "authorization";
 
 export interface ServerAuthSession {

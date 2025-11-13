@@ -22,6 +22,8 @@ The application now auto-detects a Supabase backend for durable storage. To enab
    SUPABASE_URL="https://your-project-ref.supabase.co"
    SUPABASE_SERVICE_ROLE_KEY="your-service-role-key" # or set SUPABASE_KEY to use an anon key with permissive RLS
    SUPABASE_ACCESS_REQUESTS_TABLE="access_requests" # optional override
+   NEXT_PUBLIC_SUPABASE_URL="$SUPABASE_URL" # exposes the URL to the browser for auth flows
+   NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key" # used by the client to request magic links / OAuth
    ```
 
 3. Restart the dev server. The `/api/request-access` endpoint will now read/write access requests in Supabase while preserving the JSON-file fallback when credentials are absent.
