@@ -335,12 +335,22 @@ export function VoiceChatPanel() {
         return;
       }
 
+      if (event.type === "tool-error") {
+        setError(event.error.message);
+        console.warn("Realtime tool error", event.error);
+        return;
+      }
+
       if (event.type === "session-metadata") {
         const previousSessionId = sessionMetadataRef.current?.sessionId;
         sessionMetadataRef.current = event.metadata ?? null;
 
         if (!event.metadata) {
           return;
+        }
+
+        if (event.metadata.projectStatePatch) {
+          applyScriptDocPatch(event.metadata.projectStatePatch);
         }
 
         if (!previousSessionId || previousSessionId !== event.metadata.sessionId) {

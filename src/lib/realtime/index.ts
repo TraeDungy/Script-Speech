@@ -48,7 +48,8 @@ export type RealtimeClientEvent =
       type: "tool-acknowledged";
       invocation: ToolInvocationMessage;
       acknowledgement: ToolAcknowledgement;
-    };
+    }
+  | { type: "tool-error"; invocation: ToolInvocationMessage; error: Error };
 
 type Listener<T> = (event: T) => void;
 
@@ -168,6 +169,14 @@ function parseSessionMetadata(payload: unknown): OrchestratorSessionMetadata | n
       : [],
   };
 
+  if (payload.projectStatePatch && isPlainObject(payload.projectStatePatch)) {
+    metadata.projectStatePatch = payload.projectStatePatch as OrchestratorSessionMetadata["projectStatePatch"];
+  }
+
+  if (typeof payload.projectStatePatchReason === "string") {
+    metadata.projectStatePatchReason = payload.projectStatePatchReason;
+  }
+
   return metadata;
 }
 
@@ -195,6 +204,8 @@ export class RealtimeClient {
   private remoteAudioStream: MediaStream | null = null;
   private sessionMetadata: OrchestratorSessionMetadata | null = null;
   private pendingToolRequests = new Map<string, ToolInvocationMessage>();
+  private isRecovering = false;
+  private manualDisconnect = false;
 
   constructor(options?: RealtimeClientOptions) {
     this.tokenEndpoint = options?.tokenEndpoint ?? "/api/realtime/orchestrator";
@@ -213,9 +224,13 @@ export class RealtimeClient {
     }
 
     const { session, metadata } = await this.fetchSession();
+    this.manualDisconnect = false;
     this.session = session;
     this.sessionMetadata = metadata;
     this.events.emit({ type: "session-metadata", metadata });
+    if (metadata?.sessionId) {
+      this.requestedSessionId = metadata.sessionId;
+    }
 
     const connection = new RTCPeerConnection({
       iceServers: this.iceServers,
@@ -226,7 +241,19 @@ export class RealtimeClient {
       const state = connection.connectionState;
       this.events.emit({ type: "connection-state", state });
 
-      if (state === "failed" || state === "disconnected" || state === "closed") {
+      if ((state === "failed" || state === "disconnected") && !this.manualDisconnect) {
+        void this.recoverConnection();
+        return;
+      }
+
+      if (state === "closed") {
+        if (!this.isRecovering) {
+          this.disconnect();
+        }
+        return;
+      }
+
+      if (state === "failed" || state === "disconnected") {
         this.disconnect();
       }
     });
@@ -283,6 +310,13 @@ export class RealtimeClient {
       this.events.emit({ type: "error", error });
     });
 
+    if (this.microphoneStream) {
+      for (const track of this.microphoneStream.getTracks()) {
+        const sender = connection.addTrack(track, this.microphoneStream);
+        this.microphoneSenders.add(sender);
+      }
+    }
+
     try {
       const offer = await connection.createOffer({ offerToReceiveAudio: true });
       await connection.setLocalDescription(offer);
@@ -317,7 +351,14 @@ export class RealtimeClient {
     return { session, metadata };
   }
 
-  disconnect() {
+  disconnect(options?: {
+    preserveMetadata?: boolean;
+    preserveMicrophone?: boolean;
+    preserveAudioElement?: boolean;
+    manual?: boolean;
+  }) {
+    this.manualDisconnect = options?.manual ?? true;
+
     if (this.dataChannel) {
       try {
         this.dataChannel.close();
@@ -338,12 +379,25 @@ export class RealtimeClient {
 
     this.connection = null;
     this.session = null;
-    this.sessionMetadata = null;
-    this.pendingToolRequests.clear();
+    if (!options?.preserveMetadata) {
+      this.sessionMetadata = null;
+      this.pendingToolRequests.clear();
+    }
 
-    this.stopMicrophone();
+    if (options?.preserveMicrophone && this.microphoneStream) {
+      for (const sender of this.microphoneSenders) {
+        try {
+          this.connection?.removeTrack(sender);
+        } catch {
+          // ignore failures when the sender has already been removed
+        }
+      }
+      this.microphoneSenders.clear();
+    } else {
+      this.stopMicrophone();
+    }
 
-    if (this.remoteAudioElement) {
+    if (!options?.preserveAudioElement && this.remoteAudioElement) {
       this.remoteAudioElement.srcObject = null;
     }
 
@@ -414,6 +468,56 @@ export class RealtimeClient {
     return this.sessionMetadata;
   }
 
+  async hydrateSessionMetadata(limit = 200): Promise<OrchestratorSessionMetadata | null> {
+    const metadata = this.sessionMetadata;
+    if (!metadata?.sessionId) {
+      throw new Error("Realtime session has not been established yet");
+    }
+
+    const response = await fetch(this.tokenEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: "transcript.fetch",
+        sessionId: metadata.sessionId,
+        limit,
+      }),
+      cache: "no-store",
+    });
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const message =
+        typeof payload === "object" && payload && "error" in payload
+          ? String((payload as { error?: unknown }).error)
+          : `Failed to hydrate session metadata: ${response.statusText}`;
+      throw new Error(message);
+    }
+
+    const transcripts = Array.isArray((payload as Record<string, unknown>)?.transcripts)
+      ? ((payload as { transcripts: unknown[] }).transcripts
+          .map(parseTranscriptTurn)
+          .filter((turn): turn is TranscriptTurnDTO => Boolean(turn)))
+      : [];
+
+    const hydrated: OrchestratorSessionMetadata = {
+      ...(this.sessionMetadata ?? metadata),
+      transcripts,
+    };
+
+    this.sessionMetadata = hydrated;
+    this.events.emit({ type: "session-metadata", metadata: hydrated });
+    return hydrated;
+  }
+
   async sendToolMessage(invocation: ToolInvocationMessage) {
     const metadata = this.sessionMetadata;
     if (!metadata?.sessionId || !metadata.ackToken) {
@@ -433,7 +537,9 @@ export class RealtimeClient {
       return acknowledgement;
     } catch (error) {
       this.pendingToolRequests.delete(invocation.callId);
-      throw error;
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.events.emit({ type: "tool-error", invocation, error: err });
+      throw err;
     }
   }
 
@@ -576,7 +682,52 @@ export class RealtimeClient {
       await this.sendToolMessage(invocation);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
+      this.events.emit({ type: "tool-error", invocation, error: err });
+    }
+  }
+
+  private async recoverConnection() {
+    if (this.isRecovering || this.manualDisconnect) {
+      return;
+    }
+
+    const metadata = this.sessionMetadata;
+    if (!metadata?.sessionId) {
+      this.disconnect();
+      return;
+    }
+
+    this.isRecovering = true;
+    try {
+      const preserveMicrophone = Boolean(this.microphoneStream);
+      this.disconnect({
+        preserveMetadata: true,
+        preserveMicrophone,
+        preserveAudioElement: true,
+        manual: false,
+      });
+
+      this.requestedSessionId = metadata.sessionId;
+      const { metadata: refreshed } = await this.connect();
+
+      if (!refreshed && this.sessionMetadata) {
+        this.sessionMetadata = {
+          ...this.sessionMetadata,
+          transcripts: metadata.transcripts ?? this.sessionMetadata.transcripts,
+        };
+        this.events.emit({ type: "session-metadata", metadata: this.sessionMetadata });
+        try {
+          await this.hydrateSessionMetadata();
+        } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.events.emit({ type: "error", error: err });
+        }
+      }
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
       this.events.emit({ type: "error", error: err });
+    } finally {
+      this.isRecovering = false;
     }
   }
 }

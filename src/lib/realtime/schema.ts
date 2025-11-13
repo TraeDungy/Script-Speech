@@ -53,6 +53,8 @@ export interface OrchestratorSessionMetadata {
   expiresAt?: string;
   toolSchemas: ToolSchemaDefinition[];
   transcripts?: TranscriptTurnDTO[];
+  projectStatePatch?: Partial<ScriptDoc>;
+  projectStatePatchReason?: string;
 }
 
 export const TOOL_DEFINITIONS: ToolSchemaDefinition[] = [
