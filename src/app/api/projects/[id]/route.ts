@@ -6,7 +6,10 @@ import {
   updateProject,
   type UpdateProjectInput,
 } from "@/lib/db/projects";
-import { fetchLatestScriptDoc, upsertScriptDoc } from "@/lib/db/scriptDocs";
+import {
+  fetchLatestScriptDoc,
+  upsertScriptDoc,
+} from "@/lib/db/scriptDocs";
 import {
   listEntityAssets,
   listReferenceAssets,
@@ -31,20 +34,22 @@ export async function GET(
     const { user } = await requireServerAuthSession();
     await ensureProjectMembership(projectId, user.id);
 
-    const [project, scriptDoc, references, entityAssets] = await Promise.all([
+    const [project, scriptDocRecord, references, entityAssets] = await Promise.all([
       getProject(projectId),
-      fetchLatestScriptDoc(projectId),
+      fetchLatestScriptDoc(projectId, { preferAutosave: true }),
       listReferenceAssets(projectId),
       listEntityAssets(projectId),
     ]);
 
-    if (!project && !scriptDoc) {
+    if (!project && !scriptDocRecord) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
     return NextResponse.json({
       project,
-      scriptDoc,
+      scriptDoc: scriptDocRecord?.doc ?? null,
+      scriptDocSource: scriptDocRecord?.recordType ?? null,
+      scriptDocVersion: scriptDocRecord?.versionNumber ?? null,
       assets: {
         references: references.map(serializeReferenceAsset),
         entity: entityAssets.map(serializeEntityAsset),

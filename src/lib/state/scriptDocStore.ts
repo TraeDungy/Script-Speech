@@ -2,8 +2,6 @@
 
 import { create } from "zustand";
 
-import { getMockScriptDoc } from "@/lib/db/mocks";
-
 import {
   ScriptDoc,
   ScriptDocBeat,
@@ -11,6 +9,73 @@ import {
   ScriptSceneElement,
   type ScriptDocTranscriptEntry,
 } from "@/lib/scriptDoc";
+
+const AUTOSAVE_DEBOUNCE_MS = 1500;
+
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let autosaveReady = false;
+let autosaveProjectId: string | null = null;
+let lastAutosaveDigest: string | null = null;
+let autosaveDisabled = false;
+
+const encodeDoc = (doc: ScriptDoc) => JSON.stringify(doc);
+
+async function sendAutosave(projectId: string, doc: ScriptDoc) {
+  if (typeof window === "undefined" || autosaveDisabled || !projectId) {
+    return;
+  }
+
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/script-doc/autosave`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ doc }),
+      },
+    );
+
+    if (!response.ok) {
+      if ([401, 403, 404, 501, 503].includes(response.status)) {
+        autosaveDisabled = true;
+      }
+      const message = await response.text();
+      console.error("ScriptDoc autosave failed", message);
+    }
+  } catch (error) {
+    console.error("Failed to autosave ScriptDoc", error);
+  }
+}
+
+function scheduleAutosave(doc: ScriptDoc) {
+  if (
+    typeof window === "undefined" ||
+    autosaveDisabled ||
+    !autosaveReady ||
+    !doc.metadata?.projectId
+  ) {
+    return;
+  }
+
+  const serialized = encodeDoc(doc);
+  if (serialized === lastAutosaveDigest) {
+    return;
+  }
+
+  lastAutosaveDigest = serialized;
+  autosaveProjectId = doc.metadata.projectId;
+
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer);
+  }
+
+  autosaveTimer = setTimeout(() => {
+    if (autosaveProjectId) {
+      void sendAutosave(autosaveProjectId, doc);
+    }
+  }, AUTOSAVE_DEBOUNCE_MS);
+}
 
 type ScriptDocHistoryState = {
   doc: ScriptDoc;
@@ -435,6 +500,11 @@ export const useScriptDocStore = create<ScriptDocStore>((set, get) => ({
       hasUndo: false,
       hasRedo: false,
     });
+    if (typeof window !== "undefined") {
+      autosaveReady = true;
+      autosaveProjectId = cloned.metadata?.projectId ?? null;
+      lastAutosaveDigest = encodeDoc(cloned);
+    }
   },
   updateMetadata: (updates) => {
     const state = get();
@@ -674,4 +744,13 @@ export const selectBeats = (state: ScriptDocStore) =>
 
 export const selectScenes = (state: ScriptDocStore) =>
   [...state.doc.scenes].sort((a, b) => a.order - b.order);
+
+if (typeof window !== "undefined") {
+  useScriptDocStore.subscribe(
+    (state) => state.doc,
+    (doc) => {
+      scheduleAutosave(doc);
+    },
+  );
+}
 

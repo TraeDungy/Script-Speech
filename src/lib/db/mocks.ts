@@ -476,6 +476,9 @@ export function getMockScriptDocRow(): ScriptDocRow {
     project_id: MOCK_PROJECT_ID,
     doc: cloneScriptDoc(),
     revision_id: baseScriptDoc.revision?.id ?? null,
+    record_type: "version",
+    version_number: 1,
+    source_version_id: null,
     created_at: baseScriptDoc.metadata.createdAt,
     updated_at: baseScriptDoc.metadata.updatedAt,
   };
