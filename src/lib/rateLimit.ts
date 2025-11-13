@@ -9,7 +9,7 @@ interface RateLimitOptions {
   prefix?: string;
 }
 
-interface RateLimitResult {
+export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
   limit: number;
