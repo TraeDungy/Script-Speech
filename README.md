@@ -15,7 +15,10 @@ Visit `http://localhost:3000` to explore the voice-first landing experience.
 
 The application now auto-detects a Supabase backend for durable storage. To enable it:
 
-1. Create a Supabase project and execute both [`docs/supabase/access-requests-table.sql`](docs/supabase/access-requests-table.sql) and [`docs/supabase/export-jobs-table.sql`](docs/supabase/export-jobs-table.sql) to provision the `access_requests` and `export_jobs` tables.
+1. Create a Supabase project and execute:
+   - [`docs/supabase/access-requests-table.sql`](docs/supabase/access-requests-table.sql)
+   - [`docs/supabase/export-jobs-table.sql`](docs/supabase/export-jobs-table.sql)
+   - [`docs/supabase/marketing-content-table.sql`](docs/supabase/marketing-content-table.sql) for the marketing revision store.
 2. Add the following environment variables to your `.env.local` (or hosting provider secrets):
 
    ```bash
@@ -24,9 +27,20 @@ The application now auto-detects a Supabase backend for durable storage. To enab
    SUPABASE_ACCESS_REQUESTS_TABLE="access_requests" # optional override
    NEXT_PUBLIC_SUPABASE_URL="$SUPABASE_URL" # exposes the URL to the browser for auth flows
    NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key" # used by the client to request magic links / OAuth
+   MARKETING_ADMIN_EMAILS="you@example.com,partner@example.com" # comma or space separated list allowed to edit marketing copy
    ```
 
 3. Restart the dev server. The `/api/request-access` endpoint will now read/write access requests in Supabase while preserving the JSON-file fallback when credentials are absent.
+
+### Marketing content admin panel
+
+Run `npm run dev` and visit `/admin/marketing` while signed in to a Supabase account whose email is listed in `MARKETING_ADMIN_EMAILS`. From there you can:
+
+- Save draft snapshots of the landing and FAQ JSON payloads without touching the repo.
+- Generate shareable previews (visible only to admins) before publishing.
+- Promote a draft to production, which automatically archives the previous live revision.
+
+Every edit is stored in Supabase with author metadata so you can audit marketing changes alongside studio data.
 
 ## Scripts
 
