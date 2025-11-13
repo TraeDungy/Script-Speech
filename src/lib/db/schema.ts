@@ -49,7 +49,19 @@ export interface ReferenceAssetRow {
   content_type: string;
   size: number;
   tags: string[] | null;
-  status: "pending" | "ready";
+  status:
+    | "pending"
+    | "uploading"
+    | "scanning"
+    | "processing"
+    | "ready"
+    | "failed"
+    | "quarantined";
+  scan_status: "pending" | "clean" | "infected" | "error";
+  transcode_status: "pending" | "queued" | "processing" | "ready" | "error";
+  processing_progress: number | null;
+  failure_code: string | null;
+  failure_message: string | null;
   created_at: string;
   updated_at: string;
   attribution: string | null;

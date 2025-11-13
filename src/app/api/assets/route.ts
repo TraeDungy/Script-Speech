@@ -8,7 +8,13 @@ import {
   recordAssetBinary,
   serializeReferenceAsset,
   updateReferenceAsset,
+  updateReferenceAssetLifecycle,
 } from "@/lib/assets";
+import type {
+  AssetScanStatus,
+  AssetStatus,
+  AssetTranscodeStatus,
+} from "@/lib/types/assets";
 import {
   captureApiException,
   recordApiError,
@@ -167,6 +173,68 @@ export async function PUT(request: NextRequest) {
       await ensureProjectMembership(asset.projectId, user.id, { minimumRole: "member" });
     }
 
+    const contentTypeHeader = request.headers.get("content-type") ?? "";
+
+    if (contentTypeHeader.startsWith("application/json")) {
+      const payload = await request.json();
+      const statusUpdates = payload.statusUpdates as Record<string, unknown> | undefined;
+      if (!statusUpdates) {
+        return NextResponse.json({ error: "Missing statusUpdates" }, { status: 400 });
+      }
+
+      const updated = await updateReferenceAssetLifecycle(assetId, {
+        status:
+          typeof statusUpdates.status === "string"
+            ? (statusUpdates.status as AssetStatus)
+            : undefined,
+        scanStatus:
+          typeof statusUpdates.scanStatus === "string"
+            ? (statusUpdates.scanStatus as AssetScanStatus)
+            : undefined,
+        transcodeStatus:
+          typeof statusUpdates.transcodeStatus === "string"
+            ? (statusUpdates.transcodeStatus as AssetTranscodeStatus)
+            : undefined,
+        processingProgress:
+          typeof statusUpdates.processingProgress === "number"
+            ? statusUpdates.processingProgress
+            : null,
+        failureCode:
+          typeof statusUpdates.failureCode === "string" ? statusUpdates.failureCode : null,
+        failureMessage:
+          typeof statusUpdates.failureMessage === "string"
+            ? statusUpdates.failureMessage
+            : null,
+        contentType:
+          typeof statusUpdates.contentType === "string"
+            ? statusUpdates.contentType
+            : undefined,
+        size:
+          typeof statusUpdates.size === "number"
+            ? statusUpdates.size
+            : undefined,
+        url: typeof statusUpdates.url === "string" ? statusUpdates.url : undefined,
+        thumbnailUrl:
+          typeof statusUpdates.thumbnailUrl === "string"
+            ? statusUpdates.thumbnailUrl
+            : undefined,
+      });
+
+      if (!updated) {
+        return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+      }
+
+      await logAuditEvent({
+        action: "asset.lifecycle.update",
+        userId: user.id,
+        projectId: updated.projectId ?? undefined,
+        targetId: updated.id,
+        details: statusUpdates,
+      });
+
+      return NextResponse.json({ asset: serializeReferenceAsset(updated) });
+    }
+
     const rate = await enforceRateLimit({
       key: `${user.id}:${asset.projectId ?? "global"}:upload`,
       limit: 10,
@@ -189,7 +257,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const contentType = request.headers.get("content-type") ?? asset.contentType;
+    const contentType = contentTypeHeader || asset.contentType;
     const data = Buffer.from(await request.arrayBuffer());
 
     const updated = await recordAssetBinary(assetId, data, contentType);
