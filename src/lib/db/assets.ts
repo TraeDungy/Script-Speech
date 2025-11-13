@@ -166,21 +166,53 @@ export async function modifyReferenceAsset(
   }
 
   const supabase = getSupabaseClient();
-  const payload: Partial<ReferenceAssetRow> = {
-    name: updates.name,
-    description: updates.description ?? null,
-    url: updates.url,
-    thumbnail_url: updates.thumbnailUrl ?? null,
-    preview_color: updates.previewColor ?? null,
-    tags: updates.tags,
-    status: updates.status,
-    scan_status: updates.scanStatus,
-    transcode_status: updates.transcodeStatus,
-    processing_progress: updates.processingProgress ?? null,
-    failure_code: updates.failureCode ?? null,
-    failure_message: updates.failureMessage ?? null,
-    attribution: updates.attribution ?? null,
-  };
+  const payload: Partial<ReferenceAssetRow> = {};
+
+  if (Object.prototype.hasOwnProperty.call(updates, "name")) {
+    payload.name = updates.name ?? "";
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "description")) {
+    payload.description = updates.description ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "url")) {
+    payload.url = updates.url ?? "";
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "thumbnailUrl")) {
+    payload.thumbnail_url = updates.thumbnailUrl ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "previewColor")) {
+    payload.preview_color = updates.previewColor ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "tags")) {
+    payload.tags = updates.tags ?? [];
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "status")) {
+    payload.status = updates.status as ReferenceAssetRow["status"];
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "scanStatus")) {
+    payload.scan_status = updates.scanStatus as ReferenceAssetRow["scan_status"];
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "transcodeStatus")) {
+    payload.transcode_status = updates.transcodeStatus as ReferenceAssetRow["transcode_status"];
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "processingProgress")) {
+    payload.processing_progress = updates.processingProgress ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "failureCode")) {
+    payload.failure_code = updates.failureCode ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "failureMessage")) {
+    payload.failure_message = updates.failureMessage ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "attribution")) {
+    payload.attribution = updates.attribution ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "contentType")) {
+    payload.content_type = updates.contentType ?? "application/octet-stream";
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "size")) {
+    payload.size = updates.size ?? 0;
+  }
 
   const { data, error } = await supabase
     .from<ReferenceAssetRow>("reference_assets")

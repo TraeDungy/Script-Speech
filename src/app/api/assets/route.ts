@@ -138,8 +138,20 @@ export async function POST(request: NextRequest) {
       projectId: asset.projectId ?? undefined,
     });
 
+    let responseAsset = asset;
+    if (!asset.url && signedUpload.assetUrl) {
+      try {
+        const updated = await updateReferenceAsset(asset.id, { url: signedUpload.assetUrl });
+        if (updated) {
+          responseAsset = updated;
+        }
+      } catch (updateError) {
+        console.warn("Failed to persist storage URL for asset", updateError);
+      }
+    }
+
     return NextResponse.json({
-      asset: serializeReferenceAsset(asset),
+      asset: serializeReferenceAsset(responseAsset),
       upload: signedUpload,
     });
   } catch (error) {

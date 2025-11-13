@@ -17,8 +17,26 @@ const storageModule = vi.hoisted(() => ({
   getStorageProvider: vi.fn(),
 }));
 
+const authModule = vi.hoisted(() => {
+  class UnauthorizedError extends Error {}
+  return {
+    requireServerAuthSession: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
+    UnauthorizedError,
+  };
+});
+
+const authzModule = vi.hoisted(() => {
+  class ProjectAuthorizationError extends Error {}
+  return {
+    ensureProjectMembership: vi.fn(),
+    ProjectAuthorizationError,
+  };
+});
+
 vi.mock("@/lib/assets", () => assetModule);
 vi.mock("@/lib/storage", () => storageModule);
+vi.mock("@/lib/auth/server", () => authModule);
+vi.mock("@/lib/authz/projects.server", () => authzModule);
 
 const mockListReferenceAssets = assetModule.listReferenceAssets;
 const mockGetReferenceAsset = assetModule.getReferenceAsset;
@@ -27,6 +45,8 @@ const mockRecordAssetBinary = assetModule.recordAssetBinary;
 const mockUpdateReferenceAsset = assetModule.updateReferenceAsset;
 const mockUpdateReferenceAssetLifecycle = assetModule.updateReferenceAssetLifecycle;
 const mockGetStorageProvider = storageModule.getStorageProvider;
+const mockRequireServerAuthSession = authModule.requireServerAuthSession;
+const mockEnsureProjectMembership = authzModule.ensureProjectMembership;
 
 const observabilityModule = vi.hoisted(() => ({
   recordApiRequest: vi.fn(),
@@ -44,6 +64,8 @@ const mockCaptureApiException = observabilityModule.captureApiException;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockRequireServerAuthSession.mockResolvedValue({ user: { id: "user-1" } });
+  mockEnsureProjectMembership.mockResolvedValue(undefined);
 });
 
 describe("/api/assets", () => {
@@ -78,9 +100,17 @@ describe("/api/assets", () => {
   });
 
   it("creates a new asset and returns upload info", async () => {
-    mockCreateReferenceAsset.mockResolvedValueOnce({ id: "asset-1", projectId: "p1" });
+    mockCreateReferenceAsset.mockResolvedValueOnce({ id: "asset-1", projectId: "p1", url: "" });
+    mockUpdateReferenceAsset.mockResolvedValueOnce({
+      id: "asset-1",
+      projectId: "p1",
+      url: "https://storage/asset-1",
+    });
     mockGetStorageProvider.mockReturnValueOnce({
-      createSignedUpload: vi.fn().mockResolvedValue({ uploadUrl: "signed" }),
+      createSignedUpload: vi
+        .fn()
+        .mockResolvedValue({ uploadUrl: "signed", assetUrl: "https://storage/asset-1" }),
+      createSignedDownload: vi.fn(),
     });
 
     const request = new NextRequest("http://localhost/api/assets", {
@@ -92,8 +122,11 @@ describe("/api/assets", () => {
     const response = await POST(request);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      asset: { id: "asset-1", projectId: "p1" },
+      asset: { id: "asset-1", projectId: "p1", url: "https://storage/asset-1" },
       upload: { uploadUrl: "signed" },
+    });
+    expect(mockUpdateReferenceAsset).toHaveBeenCalledWith("asset-1", {
+      url: "https://storage/asset-1",
     });
   });
 

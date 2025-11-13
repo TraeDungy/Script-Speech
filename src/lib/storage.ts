@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import { getSupabaseClient } from "@/lib/db/client";
@@ -30,6 +30,12 @@ export interface SignedUpload {
   expiresAt: string;
 }
 
+export interface SignedDownload {
+  url: string;
+  headers?: Record<string, string>;
+  expiresAt: string;
+}
+
 export interface StorageProvider {
   createSignedUpload(input: {
     assetId: string;
@@ -37,6 +43,13 @@ export interface StorageProvider {
     size: number;
     projectId?: string | null;
   }): Promise<SignedUpload>;
+
+  createSignedDownload(input: {
+    assetId: string;
+    contentType: string;
+    projectId?: string | null;
+    fileName?: string;
+  }): Promise<SignedDownload>;
 }
 
 function normaliseContentType(value: string): string {
@@ -160,6 +173,19 @@ class LocalStorageProvider implements StorageProvider {
       expiresAt: expires.toISOString(),
     };
   }
+
+  async createSignedDownload({ assetId }: {
+    assetId: string;
+    contentType: string;
+    projectId?: string | null;
+    fileName?: string;
+  }): Promise<SignedDownload> {
+    const expiresAt = new Date(Date.now() + STORAGE_SIGNED_URL_TTL_SECONDS * 1000).toISOString();
+    return {
+      url: `/api/assets?assetId=${assetId}`,
+      expiresAt,
+    };
+  }
 }
 
 class SupabaseStorageProvider implements StorageProvider {
@@ -217,6 +243,51 @@ class SupabaseStorageProvider implements StorageProvider {
       },
       assetUrl: baseUrl ?? fallbackAssetUrl,
       expiresAt,
+    };
+  }
+
+  async createSignedDownload({
+    assetId,
+    contentType,
+    projectId,
+    fileName,
+  }: {
+    assetId: string;
+    contentType: string;
+    projectId?: string | null;
+    fileName?: string;
+  }): Promise<SignedDownload> {
+    if (!isSupabaseConfigured()) {
+      throw new Error("Supabase storage is not configured");
+    }
+
+    const client = getSupabaseClient();
+    const path = buildStoragePath({
+      assetId,
+      contentType,
+      projectId,
+      prefix: SUPABASE_STORAGE_FOLDER,
+    });
+
+    const { data, error } = await client.storage
+      .from(SUPABASE_STORAGE_BUCKET)
+      .createSignedUrl(path, STORAGE_SIGNED_URL_TTL_SECONDS, {
+        download: fileName,
+      });
+
+    if (error || !data) {
+      console.error("Failed to create Supabase signed download", error);
+      throw error ?? new Error("Unable to create signed download");
+    }
+
+    const supabaseBaseUrl = SUPABASE_URL?.replace(/\/$/, "");
+    const absoluteUrl = data.signedUrl.startsWith("http")
+      ? data.signedUrl
+      : `${supabaseBaseUrl ?? ""}${data.signedUrl.startsWith("/") ? "" : "/"}${data.signedUrl}`;
+
+    return {
+      url: absoluteUrl,
+      expiresAt: new Date(Date.now() + STORAGE_SIGNED_URL_TTL_SECONDS * 1000).toISOString(),
     };
   }
 }
@@ -292,6 +363,44 @@ class S3StorageProvider implements StorageProvider {
       },
       assetUrl,
       expiresAt,
+    };
+  }
+
+  async createSignedDownload({
+    assetId,
+    contentType,
+    projectId,
+    fileName,
+  }: {
+    assetId: string;
+    contentType: string;
+    projectId?: string | null;
+    fileName?: string;
+  }): Promise<SignedDownload> {
+    if (!S3_BUCKET || !S3_REGION) {
+      throw new Error("S3 storage is not configured");
+    }
+
+    const key = buildStoragePath({
+      assetId,
+      contentType,
+      projectId,
+      prefix: S3_PREFIX,
+    });
+
+    const command = new GetObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: key,
+      ResponseContentDisposition: fileName ? `attachment; filename="${encodeURIComponent(fileName)}"` : undefined,
+    });
+
+    const url = await getSignedUrl(this.client, command, {
+      expiresIn: STORAGE_SIGNED_URL_TTL_SECONDS,
+    });
+
+    return {
+      url,
+      expiresAt: new Date(Date.now() + STORAGE_SIGNED_URL_TTL_SECONDS * 1000).toISOString(),
     };
   }
 }
