@@ -10,6 +10,7 @@ import {
   upsertMockProjectMembership,
 } from "./mocks";
 import { fetchLatestScriptDoc } from "./scriptDocs";
+import type { ScriptDocRecordType } from "./scriptDocs";
 import type { ProjectMemberRow, ProjectRow } from "./schema";
 import type { ScriptDoc } from "@/lib/scriptDoc";
 
@@ -239,6 +240,8 @@ export async function getProject(projectId: string): Promise<ProjectSummary | nu
 export interface StudioHydrationPayload {
   project: ProjectSummary | null;
   scriptDoc: ScriptDoc | null;
+  scriptDocSource: ScriptDocRecordType | null;
+  scriptDocVersionNumber: number | null;
 }
 
 export async function getStudioHydration(
@@ -249,15 +252,22 @@ export async function getStudioHydration(
     return {
       project,
       scriptDoc: getMockScriptDoc(),
+      scriptDocSource: "version",
+      scriptDocVersionNumber: 1,
     };
   }
 
-  const [project, scriptDoc] = await Promise.all([
+  const [project, scriptDocRecord] = await Promise.all([
     getProject(projectId),
-    fetchLatestScriptDoc(projectId),
+    fetchLatestScriptDoc(projectId, { preferAutosave: true }),
   ]);
 
-  return { project, scriptDoc };
+  return {
+    project,
+    scriptDoc: scriptDocRecord?.doc ?? null,
+    scriptDocSource: scriptDocRecord?.recordType ?? null,
+    scriptDocVersionNumber: scriptDocRecord?.versionNumber ?? null,
+  };
 }
 
 export async function createProject(

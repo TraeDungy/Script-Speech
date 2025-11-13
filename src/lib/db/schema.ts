@@ -33,6 +33,42 @@ export interface ScriptDocRow {
   project_id: string;
   doc: ScriptDoc;
   revision_id: string | null;
+  record_type: "version" | "autosave";
+  version_number: number | null;
+  source_version_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BeatRow {
+  id: string;
+  project_id: string;
+  script_doc_id: string | null;
+  beat_id: string;
+  title: string;
+  summary: string | null;
+  intent: string | null;
+  order_index: number;
+  duration_seconds: number | null;
+  spotlight_character_ids: string[] | null;
+  location_ids: string[] | null;
+  reference_asset_ids: string[] | null;
+  payload: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SceneRow {
+  id: string;
+  project_id: string;
+  script_doc_id: string | null;
+  scene_id: string;
+  beat_id: string | null;
+  title: string | null;
+  summary: string | null;
+  slugline: unknown;
+  order_index: number;
+  payload: unknown;
   created_at: string;
   updated_at: string;
 }
@@ -74,7 +110,7 @@ export interface EntityAssetRow {
   entity_id: string;
   entity_type: EntityAssetTargetType;
   caption: string | null;
-  order: number;
+  order_index: number;
   is_private: boolean;
   created_at: string;
   updated_at: string;

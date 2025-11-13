@@ -57,7 +57,7 @@ function mapEntityAssetRow(row: EntityAssetRow): EntityAsset {
     entityId: row.entity_id,
     entityType: row.entity_type,
     caption: row.caption,
-    order: row.order,
+    order: row.order_index,
     isPrivate: row.is_private,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -252,7 +252,7 @@ export async function fetchEntityAssets(
     .from<EntityAssetRow>("entity_assets")
     .select("*")
     .eq("project_id", projectId)
-    .order("order", { ascending: true });
+    .order("order_index", { ascending: true });
 
   if (!options?.includePrivate) {
     query = query.eq("is_private", false);
@@ -414,7 +414,7 @@ export async function upsertEntityAssetRecord(
     entity_id: input.entityId,
     entity_type: input.entityType,
     caption: input.caption ?? null,
-    order: input.order ?? 0,
+    order_index: input.order ?? 0,
     is_private: input.isPrivate ?? false,
   } satisfies Partial<EntityAssetRow> & {
     project_id: string;
