@@ -147,3 +147,55 @@ export interface MarketingContentRow<T = unknown> {
   created_at: string;
   updated_at: string;
 }
+
+export type ProjectSessionStatus = "collecting" | "confirmed" | "abandoned";
+
+export interface ProjectSessionRow {
+  id: string;
+  project_id: string;
+  user_id: string;
+  status: ProjectSessionStatus;
+  slots: Record<string, unknown> | null;
+  summary: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectSlotEntryRow {
+  id: string;
+  project_id: string;
+  session_id: string;
+  slot_name: string;
+  value_text: string | null;
+  value_json: Record<string, unknown> | unknown[] | string | number | null;
+  source: "api" | "text" | "voice" | "import";
+  confidence: number | null;
+  captured_at: string;
+  updated_at: string;
+}
+
+export interface ProjectTranscriptRow {
+  id: string;
+  project_id: string;
+  session_id: string | null;
+  speaker: string;
+  transcript: string;
+  source: string;
+  confidence: number | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface ScriptSpecRow {
+  project_id: string;
+  format: string | null;
+  tone_keywords: string[] | null;
+  constraint_notes: string | null;
+  structural_preferences: Record<string, unknown> | null;
+  rating: string | null;
+  custom_constraints: Record<string, unknown> | null;
+  captured_from_session_id: string | null;
+  captured_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
