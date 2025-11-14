@@ -1,5 +1,4 @@
-import { Ratelimit } from "@upstash/ratelimit";
-import { Redis } from "@upstash/redis";
+import { getRedisClientFromEnv, UpstashRedisClient } from "./upstashRedis";
 
 interface RateLimitOptions {
   key: string;
@@ -16,10 +15,7 @@ export interface RateLimitResult {
   resetAt: number;
 }
 
-const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
-const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-const redisLimiters = new Map<string, Ratelimit>();
+const redisClient = getRedisClientFromEnv();
 
 interface MemoryRecord {
   count: number;
@@ -28,44 +24,42 @@ interface MemoryRecord {
 
 const memoryBuckets = new Map<string, MemoryRecord>();
 
-function getRedisLimiter(limit: number, windowMs: number, prefix?: string): Ratelimit {
-  const windowSeconds = Math.max(1, Math.round(windowMs / 1000));
-  const key = `${prefix ?? "rate"}:${limit}:${windowSeconds}`;
-  const existing = redisLimiters.get(key);
-  if (existing) {
-    return existing;
+async function enforceRedisRateLimit(
+  client: UpstashRedisClient,
+  options: RateLimitOptions,
+  cost: number,
+): Promise<RateLimitResult | null> {
+  const expireMs = Math.max(1000, Math.round(options.windowMs));
+  const bucketKey = `${options.prefix ?? "rate"}:${options.key}:${options.limit}:${expireMs}`;
+  const now = Date.now();
+
+  try {
+    const usage = await client.incrBy(bucketKey, cost);
+    let ttl: number;
+    if (usage === cost) {
+      await client.pexpire(bucketKey, expireMs);
+      ttl = expireMs;
+    } else {
+      ttl = await client.pttl(bucketKey);
+      if (ttl < 0) {
+        await client.pexpire(bucketKey, expireMs);
+        ttl = expireMs;
+      }
+    }
+
+    return {
+      allowed: usage <= options.limit,
+      remaining: Math.max(0, options.limit - usage),
+      limit: options.limit,
+      resetAt: now + ttl,
+    };
+  } catch (error) {
+    console.warn("Redis rate limiter failed, falling back to in-memory limiter", error);
+    return null;
   }
-
-  const redis = Redis.fromEnv();
-  const limiter = new Ratelimit({
-    redis,
-    limiter: Ratelimit.fixedWindow(limit, `${windowSeconds} s`),
-    analytics: false,
-    prefix: key,
-  });
-
-  redisLimiters.set(key, limiter);
-  return limiter;
 }
 
-export async function enforceRateLimit(options: RateLimitOptions): Promise<RateLimitResult> {
-  const cost = Math.max(1, options.cost ?? 1);
-
-  if (redisUrl && redisToken) {
-    try {
-      const limiter = getRedisLimiter(options.limit, options.windowMs, options.prefix);
-      const result = await limiter.limit(options.key, { cost });
-      return {
-        allowed: result.success,
-        remaining: Math.max(0, result.remaining),
-        limit: options.limit,
-        resetAt: result.reset * 1000,
-      };
-    } catch (error) {
-      console.warn("Redis rate limiter failed, falling back to in-memory limiter", error);
-    }
-  }
-
+function enforceMemoryRateLimit(options: RateLimitOptions, cost: number): RateLimitResult {
   const now = Date.now();
   const bucketKey = `${options.prefix ?? "rate"}:${options.key}:${options.limit}:${options.windowMs}`;
   const record = memoryBuckets.get(bucketKey);
@@ -98,4 +92,17 @@ export async function enforceRateLimit(options: RateLimitOptions): Promise<RateL
     limit: options.limit,
     resetAt: record.resetAt,
   };
+}
+
+export async function enforceRateLimit(options: RateLimitOptions): Promise<RateLimitResult> {
+  const cost = Math.max(1, options.cost ?? 1);
+
+  if (redisClient) {
+    const redisResult = await enforceRedisRateLimit(redisClient, options, cost);
+    if (redisResult) {
+      return redisResult;
+    }
+  }
+
+  return enforceMemoryRateLimit(options, cost);
 }
