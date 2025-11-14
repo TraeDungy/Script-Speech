@@ -1,21 +1,9 @@
 import type { ScriptDoc } from "@/lib/scriptDoc";
 import type { EntityAssetTargetType } from "@/lib/types/assets";
 import type { ExportFormat, ExportJobStatus } from "@/lib/exports/types";
+import type { Tables } from "./generated.types";
 
-export interface ProjectRow {
-  id: string;
-  title: string;
-  script_type: string;
-  genre: string | null;
-  logline: string | null;
-  status: "outline" | "draft" | "polish" | "locked";
-  created_at: string;
-  updated_at: string;
-  owner_id: string | null;
-  tags: string[] | null;
-  target_length_unit: "pages" | "minutes" | "seconds" | null;
-  target_length_value: number | null;
-}
+export type ProjectRow = Tables<"projects">;
 
 export interface ProjectMemberRow {
   id: string;
@@ -28,16 +16,10 @@ export interface ProjectMemberRow {
   updated_at: string;
 }
 
-export interface ScriptDocRow {
-  id: string;
-  project_id: string;
+type GeneratedScriptDocRow = Tables<"script_docs">;
+
+export interface ScriptDocRow extends Omit<GeneratedScriptDocRow, "doc"> {
   doc: ScriptDoc;
-  revision_id: string | null;
-  record_type: "version" | "autosave";
-  version_number: number | null;
-  source_version_id: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface BeatRow {
@@ -116,21 +98,18 @@ export interface EntityAssetRow {
   updated_at: string;
 }
 
-export interface ExportJobRow {
-  id: string;
-  project_id: string;
-  format: ExportFormat;
-  status: ExportJobStatus;
-  deliver_to_email: string | null;
+type ExportJobRowResult = {
+  downloadUrl: string;
+  fileName: string;
+  notes?: string;
+};
+
+type GeneratedExportJobRow = Tables<"export_jobs">;
+
+export interface ExportJobRow
+  extends Omit<GeneratedExportJobRow, "script_doc" | "result"> {
   script_doc: ScriptDoc;
-  result: {
-    downloadUrl: string;
-    fileName: string;
-    notes?: string;
-  } | null;
-  error: string | null;
-  created_at: string;
-  updated_at: string;
+  result: ExportJobRowResult | null;
 }
 
 export type MarketingContentStatus = "draft" | "published" | "archived";
