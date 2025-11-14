@@ -19,6 +19,8 @@
     "@supabase/supabase-js": "2.45.3",
     "@upstash/ratelimit": "1.2.1",
     "@upstash/redis": "1.30.0",
+    "zod": "3.23.8",
+    "zod-to-json-schema": "3.23.3",
     "next": "14.2.11",
     "react": "18.3.1",
     "react-dom": "18.3.1",
