@@ -18,6 +18,7 @@ import {
 import { ensureProjectMembership } from "@/lib/authz/projects.server";
 import { logAuditEvent } from "@/lib/auditLog";
 import { moderateRealtimeText } from "./middleware.server";
+import { captureServiceException, logStructuredEvent, withSpan } from "@/lib/observability";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && Object.getPrototypeOf(value) === Object.prototype;
@@ -28,6 +29,8 @@ interface SessionCacheEntry {
   projectId?: string;
   expiresAt?: string;
 }
+
+const ORCHESTRATOR_SERVICE = "realtime-orchestrator";
 
 export class RealtimeOrchestratorError extends Error {
   readonly status: number;
@@ -136,66 +139,94 @@ export interface TranscriptFetchInput {
 export class RealtimeOrchestratorService {
   private readonly sessionCache = new Map<string, SessionCacheEntry>();
 
-  async createSession(input: CreateSessionInput): Promise<{ session: Record<string, unknown>; metadata: OrchestratorSessionMetadata }>
-  {
-    if (input.projectId) {
-      await ensureProjectMembership(input.projectId, input.userId, { minimumRole: "member" });
-    }
+  async createSession(
+    input: CreateSessionInput,
+  ): Promise<{ session: Record<string, unknown>; metadata: OrchestratorSessionMetadata }> {
+    return withSpan(
+      { name: "orchestrator.createSession", attributes: { projectId: input.projectId ?? "standalone" } },
+      async (span) => {
+        try {
+          if (input.projectId) {
+            await ensureProjectMembership(input.projectId, input.userId, { minimumRole: "member" });
+          }
 
-    const session = await createRealtimeSession({
-      model: process.env.OPENAI_REALTIME_MODEL ?? "gpt-4o-realtime-preview-2024-12-10",
-      voice: process.env.OPENAI_REALTIME_VOICE ?? "verse",
-      instructions:
-        "Use update_project_state to synchronize ScriptDoc patches and log_transcript_turn to persist transcript updates.",
-      tools: TOOL_DEFINITIONS.map((tool) => ({
-        type: "function",
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.schema,
-      })),
-    });
+          const session = await createRealtimeSession({
+            model: process.env.OPENAI_REALTIME_MODEL ?? "gpt-4o-realtime-preview-2024-12-10",
+            voice: process.env.OPENAI_REALTIME_VOICE ?? "verse",
+            instructions:
+              "Use update_project_state to synchronize ScriptDoc patches and log_transcript_turn to persist transcript updates.",
+            tools: TOOL_DEFINITIONS.map((tool) => ({
+              type: "function",
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.schema,
+            })),
+          });
 
-    const ackToken = randomUUID();
-    const metadata = normalizeSessionMetadata(session, input.projectId, ackToken);
+          const ackToken = randomUUID();
+          const metadata = normalizeSessionMetadata(session, input.projectId, ackToken);
 
-    if (input.requestedSessionId && input.requestedSessionId !== metadata.sessionId) {
-      metadata.sessionId = input.requestedSessionId;
-    }
+          if (input.requestedSessionId && input.requestedSessionId !== metadata.sessionId) {
+            metadata.sessionId = input.requestedSessionId;
+          }
 
-    this.sessionCache.set(metadata.sessionId, {
-      ackToken,
-      projectId: metadata.projectId,
-      expiresAt: metadata.expiresAt,
-    });
+          this.sessionCache.set(metadata.sessionId, {
+            ackToken,
+            projectId: metadata.projectId,
+            expiresAt: metadata.expiresAt,
+          });
 
-    try {
-      await persistSessionMetadata({
-        sessionId: metadata.sessionId,
-        projectId: metadata.projectId,
-        ackToken,
-        expiresAt: metadata.expiresAt ?? null,
-        rawSession: session,
-        orchestratorSessionId: input.requestedSessionId ?? null,
-      });
-    } catch (error) {
-      console.warn("Failed to persist realtime session metadata", error);
-    }
+          try {
+            await persistSessionMetadata({
+              sessionId: metadata.sessionId,
+              projectId: metadata.projectId,
+              ackToken,
+              expiresAt: metadata.expiresAt ?? null,
+              rawSession: session,
+              orchestratorSessionId: input.requestedSessionId ?? null,
+            });
+          } catch (error) {
+            console.warn("Failed to persist realtime session metadata", error);
+          }
 
-    try {
-      metadata.transcripts = await fetchTranscriptTurns(metadata.sessionId, 200);
-    } catch (error) {
-      console.warn("Failed to hydrate transcript history", error);
-    }
+          try {
+            metadata.transcripts = await fetchTranscriptTurns(metadata.sessionId, 200);
+          } catch (error) {
+            console.warn("Failed to hydrate transcript history", error);
+          }
 
-    await logAuditEvent({
-      action: "realtime.session.create",
-      userId: input.userId,
-      projectId: input.projectId,
-      targetId: metadata.sessionId,
-      details: { requestedSessionId: input.requestedSessionId ?? null, expiresAt: metadata.expiresAt },
-    });
+          await logAuditEvent({
+            action: "realtime.session.create",
+            userId: input.userId,
+            projectId: input.projectId,
+            targetId: metadata.sessionId,
+            details: { requestedSessionId: input.requestedSessionId ?? null, expiresAt: metadata.expiresAt },
+          });
 
-    return { session, metadata };
+          span.setAttribute("session.id", metadata.sessionId);
+          logStructuredEvent({
+            level: "info",
+            message: "realtime.session.created",
+            context: { sessionId: metadata.sessionId, userId: input.userId },
+          });
+
+          return { session, metadata };
+        } catch (error) {
+          await captureServiceException(error, {
+            service: ORCHESTRATOR_SERVICE,
+            operation: "createSession",
+            metadata: { userId: input.userId, projectId: input.projectId ?? null },
+          });
+          logStructuredEvent({
+            level: "error",
+            message: "realtime.session.create.failed",
+            error,
+            context: { userId: input.userId, projectId: input.projectId ?? null },
+          });
+          throw error;
+        }
+      },
+    );
   }
 
   async appendTranscript(input: AppendTranscriptInput): Promise<ToolAcknowledgement> {
@@ -207,43 +238,70 @@ export class RealtimeOrchestratorService {
       throw new RealtimeOrchestratorError("Invalid transcript payload", 400);
     }
 
-    const entry = await this.requireSessionEntry(sessionId, ackToken);
+    return withSpan(
+      { name: "orchestrator.appendTranscript", attributes: { sessionId } },
+      async (span) => {
+        try {
+          const entry = await this.requireSessionEntry(sessionId, ackToken);
 
-    if (turn.projectId) {
-      await ensureProjectMembership(turn.projectId, input.userId, { minimumRole: "member" });
-    } else if (entry.projectId) {
-      await ensureProjectMembership(entry.projectId, input.userId, { minimumRole: "member" });
-    }
+          if (turn.projectId) {
+            await ensureProjectMembership(turn.projectId, input.userId, { minimumRole: "member" });
+          } else if (entry.projectId) {
+            await ensureProjectMembership(entry.projectId, input.userId, { minimumRole: "member" });
+          }
 
-    const { flagged } = await moderateRealtimeText(turn.text);
-    if (flagged) {
-      throw new RealtimeOrchestratorError("Transcript failed moderation", 400);
-    }
+          const { flagged } = await moderateRealtimeText(turn.text);
+          if (flagged) {
+            throw new RealtimeOrchestratorError("Transcript failed moderation", 400);
+          }
 
-    const projectId = turn.projectId ?? entry.projectId;
-    try {
-      await persistTranscriptTurn({ ...turn, sessionId, projectId });
-    } catch (error) {
-      console.warn("Failed to persist transcript turn", error);
-      throw new RealtimeOrchestratorError("Unable to persist transcript", 500);
-    }
+          const projectId = turn.projectId ?? entry.projectId;
+          try {
+            await persistTranscriptTurn({ ...turn, sessionId, projectId });
+          } catch (error) {
+            console.warn("Failed to persist transcript turn", error);
+            throw new RealtimeOrchestratorError("Unable to persist transcript", 500);
+          }
 
-    this.sessionCache.set(sessionId, { ...entry, projectId });
+          this.sessionCache.set(sessionId, { ...entry, projectId });
 
-    await logAuditEvent({
-      action: "transcript.turn.append",
-      userId: input.userId,
-      projectId: projectId ?? undefined,
-      targetId: turn.id,
-      details: { role: turn.role, final: turn.final },
-    });
+          await logAuditEvent({
+            action: "transcript.turn.append",
+            userId: input.userId,
+            projectId: projectId ?? undefined,
+            targetId: turn.id,
+            details: { role: turn.role, final: turn.final },
+          });
 
-    return {
-      requestId: turn.id,
-      status: "accepted",
-      timestamp: new Date().toISOString(),
-      transcriptTurn: { ...turn, sessionId, projectId },
-    } satisfies ToolAcknowledgement;
+          span.setAttribute("transcript.turnId", turn.id);
+          logStructuredEvent({
+            level: "info",
+            message: "realtime.transcript.appended",
+            context: { sessionId, turnId: turn.id },
+          });
+
+          return {
+            requestId: turn.id,
+            status: "accepted",
+            timestamp: new Date().toISOString(),
+            transcriptTurn: { ...turn, sessionId, projectId },
+          } satisfies ToolAcknowledgement;
+        } catch (error) {
+          await captureServiceException(error, {
+            service: ORCHESTRATOR_SERVICE,
+            operation: "appendTranscript",
+            metadata: { sessionId, turnId: turn.id },
+          });
+          logStructuredEvent({
+            level: "error",
+            message: "realtime.transcript.append.failed",
+            error,
+            context: { sessionId, turnId: turn.id },
+          });
+          throw error;
+        }
+      },
+    );
   }
 
   async invokeTool(input: ToolInvocationInput): Promise<ToolAcknowledgement> {
@@ -255,122 +313,178 @@ export class RealtimeOrchestratorService {
       throw new RealtimeOrchestratorError("Invalid tool invocation", 400);
     }
 
-    const entry = await this.requireSessionEntry(sessionId, ackToken);
-    const invocation = parseToolInvocationPayload(rawInvocation);
-    if (!invocation) {
-      throw new RealtimeOrchestratorError("Malformed tool invocation", 400);
-    }
+    return withSpan(
+      { name: "orchestrator.invokeTool", attributes: { sessionId } },
+      async (span) => {
+        let invocationName = "unknown";
+        try {
+          const entry = await this.requireSessionEntry(sessionId, ackToken);
+          const invocation = parseToolInvocationPayload(rawInvocation);
+          if (!invocation) {
+            throw new RealtimeOrchestratorError("Malformed tool invocation", 400);
+          }
 
-    invocation.sessionId = sessionId;
-    invocation.projectId = typeof input.payload.projectId === "string" ? input.payload.projectId : entry.projectId;
+          invocationName = invocation.name;
+          invocation.sessionId = sessionId;
+          invocation.projectId = typeof input.payload.projectId === "string" ? input.payload.projectId : entry.projectId;
 
-    if (invocation.projectId) {
-      await ensureProjectMembership(invocation.projectId, input.userId, { minimumRole: "member" });
-    }
+          if (invocation.projectId) {
+            await ensureProjectMembership(invocation.projectId, input.userId, { minimumRole: "member" });
+          }
 
-    const validationErrors = validateToolInvocationPayload(invocation);
-    if (validationErrors.length > 0) {
-      throw new RealtimeOrchestratorError(validationErrors.join("; "), 400);
-    }
+          const validationErrors = validateToolInvocationPayload(invocation);
+          if (validationErrors.length > 0) {
+            throw new RealtimeOrchestratorError(validationErrors.join("; "), 400);
+          }
 
-    const acknowledgement: ToolAcknowledgement = {
-      requestId: invocation.callId,
-      status: "accepted",
-      timestamp: new Date().toISOString(),
-    };
+          const acknowledgement: ToolAcknowledgement = {
+            requestId: invocation.callId,
+            status: "accepted",
+            timestamp: new Date().toISOString(),
+          };
 
-    if (invocation.name === "log_transcript_turn") {
-      const turn = parseTranscriptTurn(invocation.arguments);
-      if (!turn) {
-        throw new RealtimeOrchestratorError("Invalid transcript payload", 400);
-      }
+          if (invocation.name === "log_transcript_turn") {
+            const turn = parseTranscriptTurn(invocation.arguments);
+            if (!turn) {
+              throw new RealtimeOrchestratorError("Invalid transcript payload", 400);
+            }
 
-      const { flagged } = await moderateRealtimeText(turn.text);
-      if (flagged) {
-        acknowledgement.status = "rejected";
-        acknowledgement.reason = "Transcript failed moderation";
-        return acknowledgement;
-      }
+            const { flagged } = await moderateRealtimeText(turn.text);
+            if (flagged) {
+              acknowledgement.status = "rejected";
+              acknowledgement.reason = "Transcript failed moderation";
+              return acknowledgement;
+            }
 
-      const projectId = turn.projectId ?? invocation.projectId ?? entry.projectId;
-      try {
-        await persistTranscriptTurn({ ...turn, sessionId, projectId });
-      } catch (error) {
-        console.warn("Failed to persist transcript turn", error);
-        throw new RealtimeOrchestratorError("Unable to persist transcript", 500);
-      }
+            const projectId = turn.projectId ?? invocation.projectId ?? entry.projectId;
+            try {
+              await persistTranscriptTurn({ ...turn, sessionId, projectId });
+            } catch (error) {
+              console.warn("Failed to persist transcript turn", error);
+              throw new RealtimeOrchestratorError("Unable to persist transcript", 500);
+            }
 
-      this.sessionCache.set(sessionId, { ...entry, projectId });
+            this.sessionCache.set(sessionId, { ...entry, projectId });
 
-      await logAuditEvent({
-        action: "transcript.turn.append",
-        userId: input.userId,
-        projectId: projectId ?? undefined,
-        targetId: turn.id,
-        details: { role: turn.role, final: turn.final },
-      });
+            await logAuditEvent({
+              action: "transcript.turn.append",
+              userId: input.userId,
+              projectId: projectId ?? undefined,
+              targetId: turn.id,
+              details: { role: turn.role, final: turn.final },
+            });
 
-      acknowledgement.transcriptTurn = { ...turn, sessionId, projectId };
-      return acknowledgement;
-    }
+            acknowledgement.transcriptTurn = { ...turn, sessionId, projectId };
+            span.setAttribute("tool.name", invocation.name);
+            logStructuredEvent({
+              level: "info",
+              message: "realtime.tool.transcript",
+              context: { sessionId, tool: invocation.name },
+            });
+            return acknowledgement;
+          }
 
-    if (invocation.name === "update_project_state") {
-      const args = isPlainObject(invocation.arguments) ? invocation.arguments : {};
-      const patch = isPlainObject(args.patch) ? args.patch : isPlainObject(invocation.arguments) ? invocation.arguments : null;
-      if (!patch || !isPlainObject(patch)) {
-        throw new RealtimeOrchestratorError("Invalid project state patch", 400);
-      }
+          if (invocation.name === "update_project_state") {
+            const args = isPlainObject(invocation.arguments) ? invocation.arguments : {};
+            const patch = isPlainObject(args.patch) ? args.patch : isPlainObject(invocation.arguments) ? invocation.arguments : null;
+            if (!patch || !isPlainObject(patch)) {
+              throw new RealtimeOrchestratorError("Invalid project state patch", 400);
+            }
 
-      const reason = typeof args.reason === "string" ? args.reason : undefined;
+            const reason = typeof args.reason === "string" ? args.reason : undefined;
 
-      try {
-        await persistProjectStatePatch({
-          sessionId,
-          projectId: invocation.projectId,
-          patch,
-          reason,
-        });
-      } catch (error) {
-        console.warn("Failed to persist project state patch", error);
-        throw new RealtimeOrchestratorError("Unable to persist project state", 500);
-      }
+            try {
+              await persistProjectStatePatch({
+                sessionId,
+                projectId: invocation.projectId,
+                patch,
+                reason,
+              });
+            } catch (error) {
+              console.warn("Failed to persist project state patch", error);
+              throw new RealtimeOrchestratorError("Unable to persist project state", 500);
+            }
 
-      this.sessionCache.set(sessionId, {
-        ackToken: entry.ackToken,
-        projectId: invocation.projectId ?? entry.projectId,
-        expiresAt: entry.expiresAt,
-      });
+            this.sessionCache.set(sessionId, {
+              ackToken: entry.ackToken,
+              projectId: invocation.projectId ?? entry.projectId,
+              expiresAt: entry.expiresAt,
+            });
 
-      await logAuditEvent({
-        action: "project.state.patch",
-        userId: input.userId,
-        projectId: invocation.projectId ?? undefined,
-        targetId: sessionId,
-        details: { reason },
-        severity: "high",
-      });
+            await logAuditEvent({
+              action: "project.state.patch",
+              userId: input.userId,
+              projectId: invocation.projectId ?? undefined,
+              targetId: sessionId,
+              details: { reason },
+              severity: "high",
+            });
 
-      acknowledgement.projectStatePatch = patch;
-      return acknowledgement;
-    }
+            acknowledgement.projectStatePatch = patch;
+            span.setAttribute("tool.name", invocation.name);
+            logStructuredEvent({
+              level: "info",
+              message: "realtime.tool.state_patch",
+              context: { sessionId, tool: invocation.name },
+            });
+            return acknowledgement;
+          }
 
-    acknowledgement.status = "rejected";
-    acknowledgement.reason = `Unsupported tool: ${invocation.name}`;
-    return acknowledgement;
+          acknowledgement.status = "rejected";
+          acknowledgement.reason = `Unsupported tool: ${invocation.name}`;
+          span.setAttribute("tool.name", invocation.name);
+          return acknowledgement;
+        } catch (error) {
+          await captureServiceException(error, {
+            service: ORCHESTRATOR_SERVICE,
+            operation: "invokeTool",
+            metadata: { sessionId, tool: invocationName },
+          });
+          logStructuredEvent({
+            level: "error",
+            message: "realtime.tool.invoke.failed",
+            error,
+            context: { sessionId, tool: invocationName },
+          });
+          throw error;
+        }
+      },
+    );
   }
 
   async fetchTranscripts(input: TranscriptFetchInput): Promise<TranscriptTurnDTO[]> {
-    const entry = await this.ensureSessionEntry(input.sessionId);
-    if (entry?.projectId) {
-      await ensureProjectMembership(entry.projectId, input.userId);
-    }
+    return withSpan(
+      { name: "orchestrator.fetchTranscripts", attributes: { sessionId: input.sessionId } },
+      async () => {
+        try {
+          const entry = await this.ensureSessionEntry(input.sessionId);
+          if (entry?.projectId) {
+            await ensureProjectMembership(entry.projectId, input.userId);
+          }
 
-    try {
-      return await fetchTranscriptTurns(input.sessionId, input.limit ?? 200);
-    } catch (error) {
-      console.warn("Failed to load transcripts", error);
-      throw new RealtimeOrchestratorError("Unable to load transcripts", 500);
-    }
+          const transcripts = await fetchTranscriptTurns(input.sessionId, input.limit ?? 200);
+          logStructuredEvent({
+            level: "info",
+            message: "realtime.transcripts.loaded",
+            context: { sessionId: input.sessionId, count: transcripts.length },
+          });
+          return transcripts;
+        } catch (error) {
+          await captureServiceException(error, {
+            service: ORCHESTRATOR_SERVICE,
+            operation: "fetchTranscripts",
+            metadata: { sessionId: input.sessionId },
+          });
+          logStructuredEvent({
+            level: "error",
+            message: "realtime.transcripts.failed",
+            error,
+            context: { sessionId: input.sessionId },
+          });
+          throw error;
+        }
+      },
+    );
   }
 
   private async requireSessionEntry(sessionId: string, ackToken: string): Promise<SessionCacheEntry> {

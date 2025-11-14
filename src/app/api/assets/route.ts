@@ -17,6 +17,7 @@ import type {
 } from "@/lib/types/assets";
 import {
   captureApiException,
+  logStructuredEvent,
   recordApiError,
   recordApiRequest,
   withSpan,
@@ -33,38 +34,61 @@ import { logAuditEvent } from "@/lib/auditLog";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+  recordApiRequest("assets", "GET");
+
   try {
-    const { user } = await requireServerAuthSession();
-    const projectId = request.nextUrl.searchParams.get("projectId");
-    const assetId = request.nextUrl.searchParams.get("assetId");
+    return await withSpan(
+      { name: "api.assets.get", attributes: { route: "/api/assets" } },
+      async (span) => {
+        const { user } = await requireServerAuthSession();
+        const projectId = request.nextUrl.searchParams.get("projectId");
+        const assetId = request.nextUrl.searchParams.get("assetId");
 
-    if (assetId) {
-      const asset = await getReferenceAsset(assetId);
-      if (!asset) {
-        return NextResponse.json({ error: "Asset not found" }, { status: 404 });
-      }
+        if (assetId) {
+          const asset = await getReferenceAsset(assetId);
+          if (!asset) {
+            return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+          }
 
-      if (asset.projectId) {
-        await ensureProjectMembership(asset.projectId, user.id);
-      }
+          if (asset.projectId) {
+            await ensureProjectMembership(asset.projectId, user.id);
+          }
 
-      return NextResponse.json({ asset: serializeReferenceAsset(asset) });
-    }
+          logStructuredEvent({
+            level: "info",
+            message: "asset.fetched",
+            context: { assetId, projectId: asset.projectId, userId: user.id },
+          });
+          span.setAttribute("asset.mode", "single");
+          return NextResponse.json({ asset: serializeReferenceAsset(asset) });
+        }
 
-    if (projectId) {
-      await ensureProjectMembership(projectId, user.id);
-    }
+        if (projectId) {
+          await ensureProjectMembership(projectId, user.id);
+        }
 
-    const assets = await listReferenceAssets(projectId);
-    return NextResponse.json({ assets: assets.map(serializeReferenceAsset) });
+        const assets = await listReferenceAssets(projectId);
+        span.setAttribute("asset.count", assets.length);
+        logStructuredEvent({
+          level: "info",
+          message: "assets.listed",
+          context: { userId: user.id, projectId: projectId ?? "all", assetCount: assets.length },
+        });
+        return NextResponse.json({ assets: assets.map(serializeReferenceAsset) });
+      },
+    );
   } catch (error) {
     if (error instanceof UnauthorizedError) {
+      recordApiError("assets", "GET", 401);
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     if (error instanceof ProjectAuthorizationError) {
+      recordApiError("assets", "GET", 403);
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    console.error("Failed to list assets", error);
+    recordApiError("assets", "GET", 500);
+    await captureApiException(error, { route: "assets", method: "GET", status: 500 });
+    logStructuredEvent({ level: "error", message: "assets.list.failed", error });
     return NextResponse.json({ error: "Unable to load assets" }, { status: 500 });
   }
 }
@@ -74,94 +98,114 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
+    recordApiError("assets", "POST", 400);
     return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
   }
 
   const { name, description, contentType, size, projectId, tags, sourceType, url } = body;
 
   if (typeof name !== "string" || typeof contentType !== "string" || typeof size !== "number") {
+    recordApiError("assets", "POST", 400);
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
+  recordApiRequest("assets", "POST");
+
   try {
-    const { user } = await requireServerAuthSession();
-    if (typeof projectId === "string" && projectId) {
-      await ensureProjectMembership(projectId, user.id, { minimumRole: "member" });
-    }
-
-    const rate = await enforceRateLimit({
-      key: `${user.id}:${projectId ?? "global"}:create`,
-      limit: 20,
-      windowMs: 60_000,
-      prefix: "assets",
-    });
-
-    if (!rate.allowed) {
-      return NextResponse.json(
-        { error: "Asset creation rate limit exceeded" },
-        {
-          status: 429,
-          headers: {
-            "Retry-After": Math.max(
-              1,
-              Math.ceil((rate.resetAt - Date.now()) / 1000),
-            ).toString(),
-          },
-        },
-      );
-    }
-
-    const asset = await createReferenceAsset({
-      name,
-      description: typeof description === "string" ? description : undefined,
-      contentType,
-      size,
-      projectId: typeof projectId === "string" ? projectId : null,
-      tags: Array.isArray(tags) ? (tags as string[]) : undefined,
-      sourceType: typeof sourceType === "string" ? sourceType : undefined,
-      url: typeof url === "string" ? url : undefined,
-    });
-
-    await logAuditEvent({
-      action: "asset.create",
-      userId: user.id,
-      projectId: asset.projectId ?? undefined,
-      targetId: asset.id,
-      details: { name: asset.name, contentType: asset.contentType, size: asset.size },
-    });
-
-    const storage = getStorageProvider();
-    const signedUpload = await storage.createSignedUpload({
-      assetId: asset.id,
-      contentType,
-      size,
-      projectId: asset.projectId ?? undefined,
-    });
-
-    let responseAsset = asset;
-    if (!asset.url && signedUpload.assetUrl) {
-      try {
-        const updated = await updateReferenceAsset(asset.id, { url: signedUpload.assetUrl });
-        if (updated) {
-          responseAsset = updated;
+    return await withSpan(
+      { name: "api.assets.post", attributes: { route: "/api/assets" } },
+      async (span) => {
+        const { user } = await requireServerAuthSession();
+        if (typeof projectId === "string" && projectId) {
+          await ensureProjectMembership(projectId, user.id, { minimumRole: "member" });
         }
-      } catch (updateError) {
-        console.warn("Failed to persist storage URL for asset", updateError);
-      }
-    }
 
-    return NextResponse.json({
-      asset: serializeReferenceAsset(responseAsset),
-      upload: signedUpload,
-    });
+        const rate = await enforceRateLimit({
+          key: `${user.id}:${projectId ?? "global"}:create`,
+          limit: 20,
+          windowMs: 60_000,
+          prefix: "assets",
+        });
+
+        if (!rate.allowed) {
+          recordApiError("assets", "POST", 429);
+          return NextResponse.json(
+            { error: "Asset creation rate limit exceeded" },
+            {
+              status: 429,
+              headers: {
+                "Retry-After": Math.max(
+                  1,
+                  Math.ceil((rate.resetAt - Date.now()) / 1000),
+                ).toString(),
+              },
+            },
+          );
+        }
+
+        const asset = await createReferenceAsset({
+          name,
+          description: typeof description === "string" ? description : undefined,
+          contentType,
+          size,
+          projectId: typeof projectId === "string" ? projectId : null,
+          tags: Array.isArray(tags) ? (tags as string[]) : undefined,
+          sourceType: typeof sourceType === "string" ? sourceType : undefined,
+          url: typeof url === "string" ? url : undefined,
+        });
+
+        await logAuditEvent({
+          action: "asset.create",
+          userId: user.id,
+          projectId: asset.projectId ?? undefined,
+          targetId: asset.id,
+          details: { name: asset.name, contentType: asset.contentType, size: asset.size },
+        });
+
+        const storage = getStorageProvider();
+        const signedUpload = await storage.createSignedUpload({
+          assetId: asset.id,
+          contentType,
+          size,
+          projectId: asset.projectId ?? undefined,
+        });
+
+        let responseAsset = asset;
+        if (!asset.url && signedUpload.assetUrl) {
+          try {
+            const updated = await updateReferenceAsset(asset.id, { url: signedUpload.assetUrl });
+            if (updated) {
+              responseAsset = updated;
+            }
+          } catch (updateError) {
+            console.warn("Failed to persist storage URL for asset", updateError);
+          }
+        }
+
+        span.setAttribute("asset.project", responseAsset.projectId ?? "standalone");
+        logStructuredEvent({
+          level: "info",
+          message: "asset.created",
+          context: { assetId: responseAsset.id, projectId: responseAsset.projectId ?? null, userId: user.id },
+        });
+        return NextResponse.json({
+          asset: serializeReferenceAsset(responseAsset),
+          upload: signedUpload,
+        });
+      },
+    );
   } catch (error) {
     if (error instanceof UnauthorizedError) {
+      recordApiError("assets", "POST", 401);
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     if (error instanceof ProjectAuthorizationError) {
+      recordApiError("assets", "POST", 403);
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    console.error("Failed to create asset", error);
+    recordApiError("assets", "POST", 500);
+    await captureApiException(error, { route: "assets", method: "POST", status: 500 });
+    logStructuredEvent({ level: "error", message: "asset.create.failed", error });
     return NextResponse.json({ error: "Unable to create asset" }, { status: 500 });
   }
 }

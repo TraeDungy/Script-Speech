@@ -35,10 +35,41 @@ type SpanRecord = SpanOptions & {
   result?: SpanResult;
 };
 
+type StructuredLogLevel = "debug" | "info" | "warn" | "error";
+
+type StructuredLogEvent = {
+  level?: StructuredLogLevel;
+  message: string;
+  context?: Record<string, unknown>;
+  error?: unknown;
+};
+
 type SentryLike = {
   init?(options: { dsn?: string; environment?: string; tracesSampleRate?: number }): void;
   captureException(error: unknown, context?: { tags?: Record<string, string>; extra?: Record<string, unknown> }): unknown;
 };
+
+function serializeError(error: unknown): { name: string; message: string; stack?: string } {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack };
+  }
+  return { name: "Error", message: typeof error === "string" ? error : JSON.stringify(error) };
+}
+
+export function logStructuredEvent(event: StructuredLogEvent): void {
+  const level: StructuredLogLevel = event.level ?? "info";
+  const payload = {
+    ...event.context,
+    timestamp: new Date().toISOString(),
+    level,
+    message: event.message,
+    ...(event.error ? { error: serializeError(event.error) } : {}),
+  } satisfies Record<string, unknown>;
+
+  const method =
+    level === "error" ? console.error : level === "warn" ? console.warn : level === "debug" ? console.debug : console.info;
+  method("[observability]", payload);
+}
 
 function getCounters(): Map<string, Counter> {
   if (!telemetryState.__scriptSpeechCounters) {
@@ -126,28 +157,47 @@ async function loadSentry(): Promise<SentryLike | null> {
   return telemetryState.__scriptSpeechSentry;
 }
 
+async function captureWithSentry(
+  error: unknown,
+  context: { tags?: Record<string, string>; extra?: Record<string, unknown>; fallbackMessage: string },
+): Promise<void> {
+  const sentry = await loadSentry();
+  if (sentry && typeof sentry.captureException === "function") {
+    sentry.captureException(error, { tags: context.tags, extra: context.extra });
+    return;
+  }
+
+  logStructuredEvent({ level: "error", message: context.fallbackMessage, error, context: context.extra });
+}
+
 export async function captureApiException(
   error: unknown,
   context: { route: string; method: string; status?: number },
 ): Promise<void> {
-  const sentry = await loadSentry();
-  if (sentry && typeof sentry.captureException === "function") {
-    const tags: Record<string, string> = {
-      route: context.route,
-      method: context.method,
-    };
-    if (context.status !== undefined) {
-      tags.status = String(context.status);
-    }
-    sentry.captureException(error, {
-      tags,
-    });
-    return;
+  const tags: Record<string, string> = {
+    route: context.route,
+    method: context.method,
+  };
+  if (context.status !== undefined) {
+    tags.status = String(context.status);
   }
 
-  const message =
-    error instanceof Error ? `${error.name}: ${error.message}` : `Unknown error: ${String(error)}`;
-  console.error(`[observability] ${context.method} ${context.route} failed`, message);
+  await captureWithSentry(error, {
+    tags,
+    extra: { status: context.status },
+    fallbackMessage: `${context.method} ${context.route} failed`,
+  });
+}
+
+export async function captureServiceException(
+  error: unknown,
+  context: { service: string; operation: string; metadata?: Record<string, unknown> },
+): Promise<void> {
+  await captureWithSentry(error, {
+    tags: { service: context.service, operation: context.operation },
+    extra: context.metadata,
+    fallbackMessage: `${context.service}.${context.operation} failed`,
+  });
 }
 
 export async function withSpan<T>(

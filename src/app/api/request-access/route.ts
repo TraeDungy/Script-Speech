@@ -8,6 +8,7 @@ import {
 import { sendAccessRequestNotifications } from "@/lib/notifications.server";
 import {
   captureApiException,
+  logStructuredEvent,
   recordApiError,
   recordApiRequest,
   withSpan,
@@ -27,7 +28,7 @@ export async function GET() {
     );
   } catch (error) {
     recordApiError("request-access", "GET", 500);
-    console.error("Failed to list access requests", error);
+    logStructuredEvent({ level: "error", message: "access-request.list.failed", error });
     await captureApiException(error, { route: "request-access", method: "GET", status: 500 });
     return NextResponse.json(
       { success: false, message: "Unable to load access requests right now." },
@@ -74,10 +75,14 @@ export async function POST(request: Request) {
       },
     );
 
-    console.info("[api] access request received", {
-      email: payload?.email,
-      hasMetadata: Boolean(payload?.metadata),
-      clientIp,
+    logStructuredEvent({
+      level: "info",
+      message: "access-request.received",
+      context: {
+        email: payload?.email,
+        hasMetadata: Boolean(payload?.metadata),
+        clientIp,
+      },
     });
 
     return response;
@@ -87,7 +92,7 @@ export async function POST(request: Request) {
       error instanceof Error ? error.message : "Unable to process your request right now.";
 
     recordApiError("request-access", "POST", status);
-    console.error("Failed to handle access request submission", error);
+    logStructuredEvent({ level: "error", message: "access-request.create.failed", error });
     if (!(error instanceof AccessRequestError)) {
       await captureApiException(error, { route: "request-access", method: "POST", status });
     }

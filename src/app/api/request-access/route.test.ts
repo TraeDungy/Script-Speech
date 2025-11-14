@@ -37,6 +37,7 @@ const observabilityModule = vi.hoisted(() => ({
   recordApiRequest: vi.fn(),
   recordApiError: vi.fn(),
   captureApiException: vi.fn(),
+  logStructuredEvent: vi.fn(),
   withSpan: async (_options: unknown, fn: (span: { setAttribute: () => void }) => Promise<NextResponse>) =>
     fn({ setAttribute: () => {} }),
 }));
