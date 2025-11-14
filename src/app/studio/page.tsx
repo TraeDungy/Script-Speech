@@ -3,6 +3,7 @@
 import type { ChangeEvent, ReactNode, UIEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ExportQueuePanel } from "@/components/ExportQueuePanel";
 import { fetchStudioProjectData } from "./actions";
 
@@ -884,18 +885,20 @@ const DEFAULT_PROJECT_ID = "demo-project";
 export default function StudioPage() {
   const metadata = useScriptDocStore((state) => state.doc.metadata);
   const loadDoc = useScriptDocStore((state) => state.loadDoc);
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("project") ?? DEFAULT_PROJECT_ID;
 
   useEffect(() => {
     let cancelled = false;
 
     async function hydrate() {
       try {
-        const data = await fetchStudioProjectData(DEFAULT_PROJECT_ID);
+        const data = await fetchStudioProjectData(projectId);
         if (!cancelled && data?.scriptDoc) {
           loadDoc(data.scriptDoc);
         }
       } catch (error) {
-        console.error("Failed to hydrate studio project", error);
+        console.error("Failed to hydrate studio project", { projectId, error });
       }
     }
 
@@ -904,7 +907,7 @@ export default function StudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [loadDoc]);
+  }, [loadDoc, projectId]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-16 px-6 py-16 md:px-10">
