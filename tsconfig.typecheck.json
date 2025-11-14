@@ -3,6 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
+      "@/*": ["./src/*"],
       "@/lib/accessRequests.server": ["./types/typecheck/accessRequests.server.d.ts"],
       "@/lib/db/assets": ["./types/typecheck/db-assets.d.ts"],
       "@/lib/assets": ["./types/typecheck/assets.d.ts"],
@@ -18,7 +19,12 @@
       "@/lib/storage": ["./types/typecheck/storage.d.ts"],
       "@/lib/observability": ["./types/typecheck/observability.d.ts"],
       "@/lib/exports": ["./types/typecheck/exports.d.ts"],
-      "@/lib/exports/types": ["./types/typecheck/exports-types.d.ts"]
+      "@/lib/exports/types": ["./types/typecheck/exports-types.d.ts"],
+      "next/server": ["./types/typecheck/next-server.d.ts"],
+      "vitest": ["./types/typecheck/vitest.d.ts"],
+      "buffer": ["./types/typecheck/node-buffer.d.ts"],
+      "node:buffer": ["./types/typecheck/node-buffer.d.ts"],
+      "node:perf_hooks": ["./types/typecheck/node-perf_hooks.d.ts"]
     }
   },
   "include": [
@@ -31,7 +37,8 @@
     "src/lib/exports/types.ts",
     "src/app/api/request-access/route.test.ts",
     "src/app/api/assets/route.test.ts",
-    "src/app/api/exports/[jobId]/route.test.ts"
+    "src/app/api/exports/[jobId]/route.test.ts",
+    "types/typecheck/node-globals.d.ts"
   ],
   "exclude": ["node_modules"]
 }

@@ -13,6 +13,7 @@ export interface StorageProvider {
     size: number;
     projectId?: string | null;
   }): Promise<SignedUpload>;
+  createSignedDownload(input: { assetId: string; projectId?: string | null }): Promise<{ url: string; expiresAt: string }>;
 }
 
 export function getStorageProvider(): StorageProvider;
