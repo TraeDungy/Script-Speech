@@ -133,9 +133,17 @@ export interface ExportJobRow {
   updated_at: string;
 }
 
+export type MarketingContentStatus = "draft" | "published" | "archived";
+
 export interface MarketingContentRow<T = unknown> {
+  id: string;
   slug: string;
   data: T;
+  status: MarketingContentStatus;
+  author_id: string | null;
+  author_name: string | null;
+  author_email: string | null;
+  published_at: string | null;
   created_at: string;
   updated_at: string;
 }
