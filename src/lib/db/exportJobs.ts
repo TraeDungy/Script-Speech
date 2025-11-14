@@ -6,6 +6,7 @@ import { isSupabaseConfigured } from "./config";
 import {
   createMockExportJob,
   getMockExportJob,
+  listMockExportJobs,
   upsertMockExportJob,
 } from "./mocks";
 import type { ExportJobRow } from "./schema";
@@ -117,4 +118,37 @@ export async function fetchExportJobRecord(jobId: string): Promise<ExportJob | n
   }
 
   return data ? mapExportJobRow(data) : null;
+}
+
+export async function listExportJobsForProject(
+  projectId: string,
+  options: { limit?: number } = {},
+): Promise<ExportJob[]> {
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
+
+  if (!isSupabaseConfigured()) {
+    const jobs = listMockExportJobs()
+      .filter((job) => job.project_id === projectId)
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )
+      .slice(0, limit);
+    return jobs.map(mapExportJobRow);
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from<ExportJobRow>("export_jobs")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("Failed to list export jobs", error);
+    throw error;
+  }
+
+  return (data ?? []).map(mapExportJobRow);
 }
