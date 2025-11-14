@@ -1,4 +1,5 @@
-"use server";
+import type { StudioHydrationPayload } from "@/lib/db/projects";
+import type { EntityAsset, ReferenceAsset } from "@/lib/types/assets";
 
 import { listEntityAssets, listReferenceAssets } from "@/lib/assets";
 import { requireServerAuthSession } from "@/lib/auth/server";
