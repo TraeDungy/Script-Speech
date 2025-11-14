@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { Redis } from "@upstash/redis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSupabaseServiceClient } from "./supabase.server";
 import type { OrchestratorSessionMetadata, TranscriptTurnDTO } from "./realtime/schema";
+import { getRedisClientFromEnv, UpstashRedisClient } from "./upstashRedis";
 
 const SESSION_TABLE = "realtime_sessions";
 const TRANSCRIPT_TABLE = "realtime_transcript_turns";
@@ -56,22 +56,20 @@ type FileSessionRecord = {
 type FileSessionStore = Record<string, FileSessionRecord>;
 type FileTranscriptStore = Record<string, TranscriptTurnDTO[]>;
 
-let cachedRedisClient: Redis | null | undefined;
+let cachedRedisClient: UpstashRedisClient | null | undefined;
 
 function getClient(): SupabaseClient | null {
   return getSupabaseServiceClient();
 }
 
-function getRedisClient(): Redis | null {
+function getRedisClient(): UpstashRedisClient | null {
   if (cachedRedisClient !== undefined) {
     return cachedRedisClient;
   }
 
-  try {
-    cachedRedisClient = Redis.fromEnv();
-  } catch (error) {
-    console.warn("Redis client unavailable for realtime persistence", error);
-    cachedRedisClient = null;
+  cachedRedisClient = getRedisClientFromEnv();
+  if (!cachedRedisClient) {
+    console.warn("Redis client unavailable for realtime persistence");
   }
 
   return cachedRedisClient;
@@ -168,7 +166,7 @@ async function persistSessionMetadataToSupabase(
 }
 
 async function persistSessionMetadataToRedis(
-  redis: Redis,
+  redis: UpstashRedisClient,
   input: {
     sessionId: string;
     projectId?: string;
@@ -331,7 +329,7 @@ async function persistTranscriptTurnToSupabase(client: SupabaseClient, turn: Tra
   }
 }
 
-async function persistTranscriptTurnToRedis(redis: Redis, turn: TranscriptTurnDTO & { sessionId: string }) {
+async function persistTranscriptTurnToRedis(redis: UpstashRedisClient, turn: TranscriptTurnDTO & { sessionId: string }) {
   await redis.hset(`realtime:transcripts:${turn.sessionId}`, {
     [turn.id]: JSON.stringify(turn),
   });
@@ -438,7 +436,7 @@ async function persistProjectStatePatchToSupabase(
 }
 
 async function persistProjectStatePatchToRedis(
-  redis: Redis,
+  redis: UpstashRedisClient,
   input: { sessionId: string; projectId?: string; patch: unknown; reason?: string },
 ) {
   const raw = await redis.get<string>(`realtime:session:${input.sessionId}`);
