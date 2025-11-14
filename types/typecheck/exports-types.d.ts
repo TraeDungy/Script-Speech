@@ -1,4 +1,6 @@
-export type ExportFormat = "fountain" | "fdx" | "docx" | "pdf";
+import type { ScriptDoc } from "@/lib/scriptDoc";
+
+export type ExportFormat = "fountain" | "fdx" | "pdf" | "txt";
 export type ExportJobStatus = "queued" | "processing" | "completed" | "failed";
 
 export interface ExportJobResult {
@@ -19,8 +21,4 @@ export interface ExportJob {
   error?: string;
 }
 
-export interface ScriptDoc {
-  title?: string;
-  logline?: string;
-  scenes: Array<{ heading: string; action?: string; dialogue?: Array<{ character: string; text: string; parenthetical?: string }> }>;
-}
+export type { ScriptDoc };

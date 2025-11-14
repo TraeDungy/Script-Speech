@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { Redis } from "@upstash/redis";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSupabaseServiceClient } from "./supabase.server";
@@ -56,25 +55,8 @@ type FileSessionRecord = {
 type FileSessionStore = Record<string, FileSessionRecord>;
 type FileTranscriptStore = Record<string, TranscriptTurnDTO[]>;
 
-let cachedRedisClient: Redis | null | undefined;
-
 function getClient(): SupabaseClient | null {
   return getSupabaseServiceClient();
-}
-
-function getRedisClient(): Redis | null {
-  if (cachedRedisClient !== undefined) {
-    return cachedRedisClient;
-  }
-
-  try {
-    cachedRedisClient = Redis.fromEnv();
-  } catch (error) {
-    console.warn("Redis client unavailable for realtime persistence", error);
-    cachedRedisClient = null;
-  }
-
-  return cachedRedisClient;
 }
 
 async function ensureFileStore<T>(filePath: string, fallback: T): Promise<void> {
@@ -167,32 +149,6 @@ async function persistSessionMetadataToSupabase(
   }
 }
 
-async function persistSessionMetadataToRedis(
-  redis: Redis,
-  input: {
-    sessionId: string;
-    projectId?: string;
-    ackToken: string;
-    expiresAt?: string | null;
-    orchestratorSessionId?: string | null;
-  },
-): Promise<void> {
-  const existingRaw = await redis.get<string>(`realtime:session:${input.sessionId}`);
-  const existing = existingRaw ? (JSON.parse(existingRaw) as FileSessionRecord) : null;
-  const record: FileSessionRecord = {
-    sessionId: input.sessionId,
-    projectId: input.projectId ?? existing?.projectId ?? undefined,
-    ackToken: input.ackToken,
-    expiresAt: input.expiresAt ?? existing?.expiresAt ?? null,
-    orchestratorSessionId: input.orchestratorSessionId ?? existing?.orchestratorSessionId ?? null,
-    lastStatePatch: existing?.lastStatePatch,
-    statePatchReason: existing?.statePatchReason ?? null,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await redis.set(`realtime:session:${input.sessionId}`, JSON.stringify(record));
-}
-
 async function persistSessionMetadataToFile(
   input: {
     sessionId: string;
@@ -246,46 +202,6 @@ async function fetchSessionMetadataFromSupabase(
   return metadata;
 }
 
-async function fetchSessionMetadataFromRedis(sessionId: string): Promise<StoredSessionMetadata | null> {
-  const redis = getRedisClient();
-  if (!redis) {
-    return null;
-  }
-
-  try {
-    const raw = await redis.get<string>(`realtime:session:${sessionId}`);
-    if (!raw) {
-      return null;
-    }
-
-    const record = JSON.parse(raw) as FileSessionRecord;
-    if (!record.ackToken) {
-      return null;
-    }
-
-    const metadata: StoredSessionMetadata = {
-      sessionId: record.sessionId,
-      ackToken: record.ackToken,
-      projectId: record.projectId,
-      expiresAt: record.expiresAt ?? undefined,
-      toolSchemas: [],
-      transcripts: [],
-    };
-
-    if (record.lastStatePatch !== undefined) {
-      metadata.projectStatePatch = record.lastStatePatch;
-    }
-    if (record.statePatchReason) {
-      metadata.projectStatePatchReason = record.statePatchReason ?? undefined;
-    }
-
-    return metadata;
-  } catch (error) {
-    console.warn("Failed to load realtime session metadata from Redis", error);
-    return null;
-  }
-}
-
 async function fetchSessionMetadataFromFile(sessionId: string): Promise<StoredSessionMetadata | null> {
   const store = await readFileStore<FileSessionStore>(SESSION_STORE_PATH, {});
   const record = store[sessionId];
@@ -331,12 +247,6 @@ async function persistTranscriptTurnToSupabase(client: SupabaseClient, turn: Tra
   }
 }
 
-async function persistTranscriptTurnToRedis(redis: Redis, turn: TranscriptTurnDTO & { sessionId: string }) {
-  await redis.hset(`realtime:transcripts:${turn.sessionId}`, {
-    [turn.id]: JSON.stringify(turn),
-  });
-}
-
 async function persistTranscriptTurnToFile(turn: TranscriptTurnDTO & { sessionId: string }) {
   const store = await readFileStore<FileTranscriptStore>(TRANSCRIPT_STORE_PATH, {});
   const entries = store[turn.sessionId] ?? [];
@@ -380,34 +290,6 @@ async function fetchTranscriptTurnsFromSupabase(
   }));
 }
 
-async function fetchTranscriptTurnsFromRedis(sessionId: string): Promise<TranscriptTurnDTO[] | null> {
-  const redis = getRedisClient();
-  if (!redis) {
-    return null;
-  }
-
-  try {
-    const values = await redis.hvals<string>(`realtime:transcripts:${sessionId}`);
-    if (!values?.length) {
-      return [];
-    }
-
-    return values
-      .map((value) => {
-        try {
-          return JSON.parse(value) as TranscriptTurnDTO & { sessionId?: string };
-        } catch {
-          return null;
-        }
-      })
-      .filter((turn): turn is TranscriptTurnDTO => Boolean(turn))
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-  } catch (error) {
-    console.warn("Failed to load transcript turns from Redis", error);
-    return null;
-  }
-}
-
 async function fetchTranscriptTurnsFromFile(sessionId: string): Promise<TranscriptTurnDTO[]> {
   const store = await readFileStore<FileTranscriptStore>(TRANSCRIPT_STORE_PATH, {});
   return (store[sessionId] ?? []).map((entry) => ({
@@ -435,26 +317,6 @@ async function persistProjectStatePatchToSupabase(
   if (error) {
     throw new Error(error.message ?? "Failed to persist project state patch");
   }
-}
-
-async function persistProjectStatePatchToRedis(
-  redis: Redis,
-  input: { sessionId: string; projectId?: string; patch: unknown; reason?: string },
-) {
-  const raw = await redis.get<string>(`realtime:session:${input.sessionId}`);
-  const existing = raw ? (JSON.parse(raw) as FileSessionRecord) : null;
-  const record: FileSessionRecord = {
-    sessionId: input.sessionId,
-    projectId: input.projectId ?? existing?.projectId ?? undefined,
-    ackToken: existing?.ackToken ?? randomUUID(),
-    expiresAt: existing?.expiresAt ?? null,
-    orchestratorSessionId: existing?.orchestratorSessionId ?? null,
-    lastStatePatch: input.patch,
-    statePatchReason: input.reason ?? null,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await redis.set(`realtime:session:${input.sessionId}`, JSON.stringify(record));
 }
 
 async function persistProjectStatePatchToFile(input: {
@@ -488,17 +350,11 @@ export async function persistSessionMetadata(input: {
   orchestratorSessionId?: string | null;
 }): Promise<void> {
   const client = getClient();
-  const redis = getRedisClient();
 
   await executeWithFallback([
     async () => {
       if (!client) return false;
       await persistSessionMetadataToSupabase(client, input);
-      return true;
-    },
-    async () => {
-      if (!redis) return false;
-      await persistSessionMetadataToRedis(redis, input);
       return true;
     },
     async () => {
@@ -512,7 +368,6 @@ export interface StoredSessionMetadata extends OrchestratorSessionMetadata {}
 
 export async function fetchSessionMetadata(sessionId: string): Promise<StoredSessionMetadata | null> {
   const client = getClient();
-  const redis = getRedisClient();
 
   if (client) {
     try {
@@ -525,27 +380,16 @@ export async function fetchSessionMetadata(sessionId: string): Promise<StoredSes
     }
   }
 
-  const redisMetadata = await fetchSessionMetadataFromRedis(sessionId);
-  if (redisMetadata) {
-    return redisMetadata;
-  }
-
   return fetchSessionMetadataFromFile(sessionId);
 }
 
 export async function persistTranscriptTurn(turn: TranscriptTurnDTO & { sessionId: string }): Promise<void> {
   const client = getClient();
-  const redis = getRedisClient();
 
   await executeWithFallback([
     async () => {
       if (!client) return false;
       await persistTranscriptTurnToSupabase(client, turn);
-      return true;
-    },
-    async () => {
-      if (!redis) return false;
-      await persistTranscriptTurnToRedis(redis, turn);
       return true;
     },
     async () => {
@@ -572,11 +416,6 @@ export async function fetchTranscriptTurns(
     }
   }
 
-  const redisTurns = await fetchTranscriptTurnsFromRedis(sessionId);
-  if (redisTurns?.length) {
-    return redisTurns.slice(0, limit);
-  }
-
   const fileTurns = await fetchTranscriptTurnsFromFile(sessionId);
   return fileTurns.slice(0, limit);
 }
@@ -588,17 +427,11 @@ export async function persistProjectStatePatch(input: {
   reason?: string;
 }): Promise<void> {
   const client = getClient();
-  const redis = getRedisClient();
 
   await executeWithFallback([
     async () => {
       if (!client) return false;
       await persistProjectStatePatchToSupabase(client, input);
-      return true;
-    },
-    async () => {
-      if (!redis) return false;
-      await persistProjectStatePatchToRedis(redis, input);
       return true;
     },
     async () => {

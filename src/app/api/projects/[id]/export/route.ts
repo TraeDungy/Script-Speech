@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { enqueueExportJob } from "@/lib/exports";
-import type { ExportFormat, ScriptDoc } from "@/lib/exports/types";
+import { enqueueExportJob, type ExportQueuePayload } from "@/lib/exports";
+import type { ExportFormat } from "@/lib/exports/types";
+import type { ScriptDoc } from "@/lib/scriptDoc";
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
 import {
   ensureProjectMembership,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/authz/projects.server";
 import { enforceRateLimit } from "@/lib/rateLimit";
 import { logAuditEvent } from "@/lib/auditLog";
+import { recordApiError, captureApiException } from "@/lib/observability";
 
 interface RequestBody {
   format?: ExportFormat;
@@ -25,6 +27,7 @@ export async function POST(
   try {
     body = await request.json();
   } catch {
+    recordApiError("projects/export", "POST", 400);
     return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
   }
 
@@ -82,9 +85,11 @@ export async function POST(
     return NextResponse.json(job, { status: 202 });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
+      recordApiError("projects/export", "POST", 401);
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     if (error instanceof ProjectAuthorizationError) {
+      recordApiError("projects/export", "POST", 403);
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     console.error("Failed to enqueue export job", error);
@@ -93,6 +98,7 @@ export async function POST(
       method: "POST",
       status: 500,
     });
+    recordApiError("projects/export", "POST", 500);
     return NextResponse.json({ error: "Failed to enqueue export job" }, { status: 500 });
   }
 }

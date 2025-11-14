@@ -1,11 +1,14 @@
 import { Buffer } from "node:buffer";
 
+import type { ScriptDoc, ScriptScene, ScriptSceneElement } from "@/lib/scriptDoc";
+import type { ExportFormat, ExportJob } from "./types";
 import {
   createExportJobRecord,
   fetchExportJobRecord,
+  fetchExportJobRow,
   updateExportJobRecord,
 } from "@/lib/db/exportJobs";
-import type { ExportFormat, ExportJob, ScriptDoc } from "./types";
+import { isSupabaseConfigured } from "@/lib/db/config";
 
 export type ExportQueuePayload = {
   projectId: string;
@@ -14,230 +17,229 @@ export type ExportQueuePayload = {
   deliverToEmail?: string;
 };
 
-type RenderedExportResult = {
+interface RenderedExportResult {
   buffer: Buffer;
   extension: string;
   mime: string;
   notes?: string;
-};
-
-export class ExportQueue {
-  async enqueue(payload: EnqueuePayload): Promise<ExportJob> {
-    const job = await createExportJobRecord(payload);
-
-    setTimeout(() => {
-      this.processJob(job.id, payload).catch((error) => {
-        console.error("Export job failed", error);
-      });
-    }, 0);
-
-    return job;
-  }
-
-  async getJob(jobId: string): Promise<ExportJob | null> {
-    return fetchExportJobRecord(jobId);
-  }
-
-  private async processJob(jobId: string, payload: EnqueuePayload) {
-    await updateExportJobRecord(jobId, { status: "processing" });
-
-    try {
-      const result = await this.generateResult(payload);
-      const fileName = `${payload.projectId}-${jobId}.${result.extension}`;
-      const downloadUrl = `data:${result.mime};base64,${Buffer.from(result.content, "utf8").toString("base64")}`;
-
-      await updateExportJobRecord(jobId, {
-        status: "completed",
-        result: {
-          fileName,
-          downloadUrl,
-          notes: result.notes,
-        },
-        error: null,
-      });
-    } catch (error) {
-      await updateExportJobRecord(jobId, {
-        status: "failed",
-        error: error instanceof Error ? error.message : "Unexpected export failure",
-      });
-    }
-  }
-
-  private async generateResult(payload: EnqueuePayload): Promise<StubResult> {
-    await wait(650 + Math.random() * 400);
-
-    switch (payload.format) {
-      case "fountain": {
-        const content = scriptDocToFountain(payload.scriptDoc);
-        return {
-          content,
-          extension: "fountain",
-          mime: "text/plain;charset=utf-8",
-          notes: "Generated directly from the ScriptDoc structure.",
-        };
-      }
-      case "fdx":
-        return generateStubDocument(payload.format, payload.scriptDoc, payload.projectId, {
-          mime: "application/xml",
-          extension: "fdx",
-        });
-      case "docx":
-        return generateStubDocument(payload.format, payload.scriptDoc, payload.projectId, {
-          mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          extension: "docx",
-        });
-      case "pdf":
-        return generateStubDocument(payload.format, payload.scriptDoc, payload.projectId, {
-          mime: "application/pdf",
-          extension: "pdf",
-        });
-      default:
-        throw new Error(`Unsupported export format: ${job.format}`);
-    }
-  }
 }
 
-function getSupabaseServiceClient(): SupabaseClient {
+export async function enqueueExportJob(payload: ExportQueuePayload): Promise<ExportJob> {
+  const job = await createExportJobRecord(payload);
+
   if (!isSupabaseConfigured()) {
-    throw new Error(
-      "Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to enable exports.",
-    );
+    await processExportJob(job.id);
   }
 
-  if (!supabaseServiceClient) {
-    supabaseServiceClient = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
-      auth: {
-        persistSession: false,
+  return job;
+}
+
+export function getExportJob(jobId: string): Promise<ExportJob | null> {
+  return fetchExportJobRecord(jobId);
+}
+
+export async function processExportJob(jobId: string): Promise<void> {
+  const jobRow = await fetchExportJobRow(jobId);
+  if (!jobRow) {
+    throw new Error("Export job not found");
+  }
+
+  await updateExportJobRecord(jobId, { status: "processing" });
+
+  try {
+    const rendered = renderExport(jobRow.format, jobRow.script_doc);
+    const fileName = buildFileName(jobRow.project_id, rendered.extension);
+    await updateExportJobRecord(jobId, {
+      status: "completed",
+      result: {
+        fileName,
+        downloadUrl: createDataUrl(rendered.buffer, rendered.mime),
+        notes: rendered.notes,
       },
+      error: null,
     });
-  }
-
-  return supabaseServiceClient;
-}
-
-function getSupabaseAnonClient(): SupabaseClient {
-  if (!SUPABASE_ANON_KEY) {
-    return getSupabaseServiceClient();
-  }
-
-  if (!supabaseAnonClient) {
-    supabaseAnonClient = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY, {
-      auth: {
-        persistSession: false,
-      },
+  } catch (error) {
+    await updateExportJobRecord(jobId, {
+      status: "failed",
+      error: error instanceof Error ? error.message : "Export failed",
     });
+    throw error;
   }
-
-  return supabaseAnonClient;
 }
 
-function isSupabaseConfigured(): boolean {
-  return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+export function formatSseEvent(event: string, data: string): string {
+  return `event: ${event}\ndata: ${data}\n\n`;
 }
 
-function formatSupabaseError(message: string, error: SupabaseError): string {
-  const details = [error.message, error.details, error.hint]
-    .filter(Boolean)
-    .join(" | ");
-  return `${message}: ${details || "Unknown error"}`;
-}
-
-async function postJson(
-  url: string,
-  payload: unknown,
-  headers?: Record<string, string>,
-): Promise<void> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(headers ?? {}),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Request to ${url} failed with status ${response.status}`);
+function renderExport(format: ExportFormat, doc: ScriptDoc): RenderedExportResult {
+  switch (format) {
+    case "fountain":
+      return {
+        buffer: Buffer.from(scriptDocToFountain(doc), "utf8"),
+        extension: "fountain",
+        mime: "text/plain;charset=utf-8",
+        notes: "Converted to Fountain from ScriptDoc scenes.",
+      };
+    case "fdx":
+      return {
+        buffer: Buffer.from(scriptDocToFdx(doc), "utf8"),
+        extension: "fdx",
+        mime: "application/xml",
+        notes: "Simplified Final Draft XML.",
+      };
+    case "pdf":
+      return {
+        buffer: scriptDocToPdf(doc),
+        extension: "pdf",
+        mime: "application/pdf",
+        notes: "Lightweight PDF preview of ScriptDoc content.",
+      };
+    case "txt":
+      return {
+        buffer: Buffer.from(scriptDocToTxt(doc), "utf8"),
+        extension: "txt",
+        mime: "text/plain;charset=utf-8",
+        notes: "Plain-text rendering of ScriptDoc scenes.",
+      };
+    default: {
+      const unknownFormat: never = format;
+      throw new Error(`Unsupported export format: ${unknownFormat}`);
+    }
   }
 }
 
 function scriptDocToLines(doc: ScriptDoc): string[] {
   const lines: string[] = [];
-  if (doc.title) {
-    lines.push(doc.title.toUpperCase(), "");
+  const title = doc.metadata?.title ?? "Untitled";
+  lines.push(title.toUpperCase(), "");
+
+  if (doc.metadata?.logline) {
+    lines.push(doc.metadata.logline, "");
   }
-  if (doc.logline) {
-    lines.push(doc.logline, "");
-  }
-  for (const scene of doc.scenes) {
-    lines.push(scene.heading.toUpperCase());
-    if (scene.action) {
-      lines.push(scene.action, "");
+
+  for (const scene of doc.scenes.slice().sort((a, b) => a.order - b.order)) {
+    lines.push(formatSlugline(scene));
+    if (scene.summary) {
+      lines.push(scene.summary);
     }
-    for (const beat of scene.dialogue ?? []) {
-      lines.push(beat.character.toUpperCase());
-      if (beat.parenthetical) {
-        lines.push(`(${beat.parenthetical})`);
-      }
-      lines.push(beat.text, "");
+    for (const element of scene.elements) {
+      lines.push(...renderSceneElement(element));
     }
     lines.push("");
   }
+
   return lines;
 }
 
 function scriptDocToFountain(doc: ScriptDoc): string {
-  return linesFromScriptDoc(doc).join("\n").trimEnd().concat("\n");
+  return scriptDocToLines(doc).join("\n");
+}
+
+function scriptDocToTxt(doc: ScriptDoc): string {
+  const header = [
+    doc.metadata?.title ?? "Untitled",
+    doc.metadata?.logline ?? "",
+    doc.metadata?.genre ?? "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  return [header, "", ...scriptDocToLines(doc)].join("\n");
 }
 
 function scriptDocToFdx(doc: ScriptDoc): string {
   const escape = (value: string) =>
     value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const scenes = doc.scenes
+
+  const paragraphs = doc.scenes
+    .slice()
+    .sort((a, b) => a.order - b.order)
     .map((scene) => {
-      const dialogue = (scene.dialogue ?? [])
-        .map((beat) => {
-          const parenthetical = beat.parenthetical
-            ? `<Parenthetical>${escape(beat.parenthetical)}</Parenthetical>`
-            : "";
-          return `
-            <Paragraph Type="Character">${escape(beat.character)}</Paragraph>
-            ${parenthetical}
-            <Paragraph Type="Dialogue">${escape(beat.text)}</Paragraph>
-          `;
+      const slugline = `<Paragraph Type="Scene Heading">${escape(formatSlugline(scene))}</Paragraph>`;
+      const body = scene.elements
+        .map((element) => {
+          switch (element.type) {
+            case "action":
+              return `<Paragraph Type=\"Action\">${escape(element.text)}</Paragraph>`;
+            case "dialogue":
+              return [
+                `<Paragraph Type=\"Character\">${escape(element.speaker)}</Paragraph>`,
+                element.parenthetical
+                  ? `<Paragraph Type=\"Parenthetical\">(${escape(element.parenthetical)})</Paragraph>`
+                  : "",
+                `<Paragraph Type=\"Dialogue\">${escape(element.text)}</Paragraph>`,
+              ].join("");
+            case "transition":
+              return `<Paragraph Type=\"Transition\">${escape(element.text)}</Paragraph>`;
+            case "parenthetical":
+              return `<Paragraph Type=\"Parenthetical\">(${escape(element.text)})</Paragraph>`;
+            case "note":
+              return `<Paragraph Type=\"Action\">[NOTE] ${escape(element.text)}</Paragraph>`;
+            default:
+              return "";
+          }
         })
         .join("");
-      const action = scene.action
-        ? `<Paragraph Type="Action">${escape(scene.action)}</Paragraph>`
-        : "";
-      return `
-        <Paragraph Type="Scene Heading">${escape(scene.heading)}</Paragraph>
-        ${action}
-        ${dialogue}
-      `;
+      return `${slugline}${body}`;
     })
     .join("");
-  return `<?xml version="1.0" encoding="UTF-8"?>
-  <FinalDraft DocumentType="Script" Version="1">
-    <Content>${scenes}</Content>
-  </FinalDraft>`;
-}
 
-function scriptDocToDocx(doc: ScriptDoc): Buffer {
-  const paragraphs = linesFromScriptDoc(doc)
-    .map((line) => `<w:p><w:r><w:t xml:space="preserve">${line}</w:t></w:r></w:p>`)
-    .join("");
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-  <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-    <w:body>${paragraphs}</w:body>
-  </w:document>`;
-  return Buffer.from(xml, "utf8");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<FinalDraft DocumentType="Script" Version="1">
+  <Content>${paragraphs}</Content>
+</FinalDraft>`;
 }
 
 function scriptDocToPdf(doc: ScriptDoc): Buffer {
-  const body = linesFromScriptDoc(doc).join("\n");
-  const pdf = `%PDF-1.4\n${body}\n%%EOF`;
-  return Buffer.from(pdf, "utf8");
+  const text = scriptDocToFountain(doc);
+  const body = text.replace(/\r?\n/g, "\\n");
+  const pdf = `
+%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Resources << >> /MediaBox [0 0 612 792] /Contents 4 0 R >> endobj
+4 0 obj << /Length ${body.length + 33} >> stream
+BT /F1 12 Tf 50 750 Td (${body}) Tj ET
+endstream endobj
+xref
+0 5
+0000000000 65535 f 
+0000000010 00000 n 
+0000000061 00000 n 
+0000000116 00000 n 
+0000000223 00000 n 
+trailer << /Size 5 /Root 1 0 R >>
+startxref
+${body.length + 290}
+%%EOF`;
+  return Buffer.from(pdf.trim(), "utf8");
+}
+
+function renderSceneElement(element: ScriptSceneElement): string[] {
+  switch (element.type) {
+    case "action":
+      return [element.text];
+    case "dialogue": {
+      const lines = [element.speaker.toUpperCase()];
+      if (element.parenthetical) {
+        lines.push(`(${element.parenthetical})`);
+      }
+      lines.push(element.text);
+      return lines;
+    }
+    case "parenthetical":
+      return [`(${element.text})`];
+    case "transition":
+      return [element.text.toUpperCase()];
+    case "note":
+      return [`[NOTE${element.tone ? `:${element.tone}` : ""}] ${element.text}`];
+    default:
+      return [];
+  }
+}
+
+function formatSlugline(scene: ScriptScene): string {
+  return `${scene.slugline.setting}. ${scene.slugline.location} - ${scene.slugline.timeOfDay}`;
 }
 
 function createDataUrl(buffer: Buffer, mime: string): string {
@@ -248,128 +250,3 @@ function buildFileName(projectId: string, extension: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   return `${projectId}-${timestamp}.${extension}`;
 }
-
-async function renderExport(payload: ExportQueuePayload): Promise<RenderedExportResult> {
-  switch (payload.format) {
-    case "fountain":
-      return {
-        buffer: Buffer.from(scriptDocToFountain(payload.scriptDoc), "utf8"),
-        extension: "fountain",
-        mime: "text/plain;charset=utf-8",
-        notes: "Generated from script document",
-      };
-    case "fdx":
-      return {
-        buffer: Buffer.from(scriptDocToFdx(payload.scriptDoc), "utf8"),
-        extension: "fdx",
-        mime: "application/xml",
-        notes: "Simplified Final Draft XML",
-      };
-    case "docx":
-      return {
-        buffer: scriptDocToDocx(payload.scriptDoc),
-        extension: "docx",
-        mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        notes: "Minimal WordprocessingML payload",
-      };
-    case "pdf":
-      return {
-        buffer: scriptDocToPdf(payload.scriptDoc),
-        extension: "pdf",
-        mime: "application/pdf",
-        notes: "Stub PDF content for preview flows",
-      };
-    default:
-      throw new Error(`Unsupported export format: ${payload.format}`);
-  }
-}
-
-class LocalExportQueue {
-  private payloads = new Map<string, ExportQueuePayload>();
-
-  async enqueue(payload: ExportQueuePayload): Promise<ExportJob> {
-    const job = await createExportJobRecord(payload);
-    this.payloads.set(job.id, payload);
-    setTimeout(() => {
-      void this.processJob(job.id).catch((error) => {
-        console.error("Export job processing failed", error);
-      });
-    }, 10);
-    return job;
-  }
-
-  async getJob(jobId: string): Promise<ExportJob | null> {
-    return fetchExportJobRecord(jobId);
-  }
-
-  private async processJob(jobId: string): Promise<void> {
-    const payload = this.payloads.get(jobId);
-    if (!payload) {
-      return;
-    }
-
-    await updateExportJobRecord(jobId, { status: "processing" });
-
-    try {
-      const rendered = await renderExport(payload);
-      const fileName = buildFileName(payload.projectId, rendered.extension);
-      await updateExportJobRecord(jobId, {
-        status: "completed",
-        result: {
-          fileName,
-          downloadUrl: createDataUrl(rendered.buffer, rendered.mime),
-          notes: rendered.notes,
-        },
-        error: null,
-      });
-    } catch (error) {
-      await updateExportJobRecord(jobId, {
-        status: "failed",
-        error: error instanceof Error ? error.message : "Export failed",
-      });
-    } finally {
-      this.payloads.delete(jobId);
-    }
-  }
-}
-
-const globalQueueRef = globalThis as typeof globalThis & {
-  __scriptSpeechExportQueue?: LocalExportQueue;
-};
-
-export function getExportQueue(): LocalExportQueue {
-  if (!globalQueueRef.__scriptSpeechExportQueue) {
-    globalQueueRef.__scriptSpeechExportQueue = new LocalExportQueue();
-  }
-  return globalQueueRef.__scriptSpeechExportQueue;
-}
-
-export function enqueueExportJob(payload: ExportQueuePayload): Promise<ExportJob> {
-  return getExportQueue().enqueue(payload);
-}
-
-export function getExportJob(jobId: string): Promise<ExportJob | null> {
-  return getExportQueue().getJob(jobId);
-}
-
-let sharedQueue: ExportQueue | LocalExportQueue | null = null;
-
-export function getExportQueue(): ExportQueue | LocalExportQueue {
-  if (sharedQueue) {
-    return sharedQueue;
-  }
-
-  sharedQueue = isSupabaseConfigured() ? new ExportQueue() : getLocalExportQueue();
-  return sharedQueue;
-}
-
-export async function enqueueExportJob(payload: EnqueuePayload): Promise<ExportJob> {
-  const queue = getExportQueue();
-  return queue.enqueue(payload);
-}
-
-export async function getExportJob(jobId: string): Promise<ExportJob | null> {
-  const queue = getExportQueue();
-  return queue.getJob(jobId);
-}
-

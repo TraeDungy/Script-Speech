@@ -118,3 +118,27 @@ export async function fetchExportJobRecord(jobId: string): Promise<ExportJob | n
 
   return data ? mapExportJobRow(data) : null;
 }
+
+export async function fetchExportJobRow(jobId: string): Promise<ExportJobRow | null> {
+  if (!isSupabaseConfigured()) {
+    const job = getMockExportJob(jobId);
+    return job ? { ...job } : null;
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from<ExportJobRow>("export_jobs")
+    .select("*")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "PGRST116") {
+      return null;
+    }
+    console.error("Failed to fetch export job row", error);
+    throw error;
+  }
+
+  return data ?? null;
+}
