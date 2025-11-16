@@ -5,12 +5,13 @@ import {
   SUPABASE_URL,
   isSupabaseConfigured,
 } from "./config";
+import type { Database } from "./generated.types";
 
 type CachedGlobal = typeof globalThis & {
-  __scriptSpeechSupabaseClient?: SupabaseClient;
+  __scriptSpeechSupabaseClient?: SupabaseClient<Database>;
 };
 
-export function getSupabaseClient(): SupabaseClient {
+export function getSupabaseClient(): SupabaseClient<Database> {
   if (!isSupabaseConfigured() || !SUPABASE_URL) {
     throw new Error("Supabase is not configured");
   }
@@ -25,7 +26,7 @@ export function getSupabaseClient(): SupabaseClient {
     throw new Error("Supabase credentials are missing");
   }
 
-  const client = createClient(SUPABASE_URL, key, {
+  const client = createClient<Database>(SUPABASE_URL, key, {
     auth: {
       persistSession: false,
     },

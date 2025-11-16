@@ -1,5 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import crypto from "node:crypto";
 
 import { getSupabaseClient } from "@/lib/db/client";
 import { SUPABASE_URL, isSupabaseConfigured } from "@/lib/db/config";
@@ -149,6 +148,196 @@ function buildStoragePath({
   return `${prefix}/${safeProjectSegment}/${assetId}.${extension}`;
 }
 
+const S3_MAX_PRESIGN_SECONDS = 7 * 24 * 60 * 60;
+
+function encodeRfc3986(value: string): string {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+function encodeS3Key(key: string): string {
+  return key
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .map(encodeRfc3986)
+    .join("/");
+}
+
+function normaliseEndpoint(raw?: string | null): string | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const trimmed = raw.trim().replace(/\/$/, "");
+  if (!trimmed) {
+    return undefined;
+  }
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
+function buildS3UrlComponents({
+  bucket,
+  key,
+  region,
+  endpoint,
+  forcePathStyle,
+}: {
+  bucket: string;
+  key: string;
+  region: string;
+  endpoint?: string;
+  forcePathStyle: boolean;
+}): { url: URL; canonicalUri: string } {
+  const encodedKey = encodeS3Key(key);
+  if (!bucket) {
+    throw new Error("S3 bucket is required for signing");
+  }
+
+  if (endpoint) {
+    const base = new URL(endpoint);
+    const basePath = base.pathname.replace(/\/$/, "");
+    if (forcePathStyle) {
+      const path = `${basePath}/${bucket}/${encodedKey}`.replace(/\/+/g, "/");
+      const url = new URL(`${base.protocol}//${base.host}${path.startsWith("/") ? "" : "/"}${path}`);
+      return { url, canonicalUri: url.pathname || "/" };
+    }
+    const path = `${basePath}/${encodedKey}`.replace(/\/+/g, "/");
+    const url = new URL(`${base.protocol}//${bucket}.${base.host}${path.startsWith("/") ? "" : "/"}${path}`);
+    return { url, canonicalUri: url.pathname || "/" };
+  }
+
+  if (forcePathStyle) {
+    const host = `s3.${region}.amazonaws.com`;
+    const url = new URL(`https://${host}/${bucket}/${encodedKey}`);
+    return { url, canonicalUri: url.pathname || "/" };
+  }
+
+  const url = new URL(`https://${bucket}.s3.${region}.amazonaws.com/${encodedKey}`);
+  return { url, canonicalUri: url.pathname || "/" };
+}
+
+function formatAmzDate(date: Date): string {
+  const pad = (value: number, size = 2) => value.toString().padStart(size, "0");
+  return (
+    `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}` +
+    `T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`
+  );
+}
+
+function hashSha256(value: string): string {
+  return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function hmacSha256(key: crypto.BinaryLike | crypto.KeyObject, data: string): Buffer {
+  return crypto.createHmac("sha256", key).update(data, "utf8").digest();
+}
+
+function getSigningKey(secret: string, dateStamp: string, region: string): Buffer {
+  const kDate = hmacSha256(`AWS4${secret}`, dateStamp);
+  const kRegion = hmacSha256(kDate, region);
+  const kService = hmacSha256(kRegion, "s3");
+  return hmacSha256(kService, "aws4_request");
+}
+
+function buildCanonicalQuery(params: Record<string, string>): string {
+  return Object.keys(params)
+    .sort()
+    .map((key) => `${encodeRfc3986(key)}=${encodeRfc3986(params[key])}`)
+    .join("&");
+}
+
+function createPresignedS3Url({
+  method,
+  bucket,
+  region,
+  key,
+  expiresIn,
+  headers,
+  query,
+  endpoint,
+  forcePathStyle,
+  accessKeyId,
+  secretAccessKey,
+  sessionToken,
+}: {
+  method: "GET" | "PUT";
+  bucket: string;
+  region: string;
+  key: string;
+  expiresIn: number;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  endpoint?: string;
+  forcePathStyle: boolean;
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken?: string;
+}): string {
+  if (!accessKeyId || !secretAccessKey) {
+    throw new Error("S3 credentials are not configured");
+  }
+
+  const endpointUrl = normaliseEndpoint(endpoint);
+  const { url, canonicalUri } = buildS3UrlComponents({
+    bucket,
+    key,
+    region,
+    endpoint: endpointUrl,
+    forcePathStyle,
+  });
+
+  const now = new Date();
+  const amzDate = formatAmzDate(now);
+  const dateStamp = amzDate.slice(0, 8);
+  const scope = `${dateStamp}/${region}/s3/aws4_request`;
+  const expires = Math.min(S3_MAX_PRESIGN_SECONDS, Math.max(1, Math.round(expiresIn)));
+
+  const canonicalHeaders: Record<string, string> = {
+    host: url.host,
+    ...(headers
+      ? Object.fromEntries(
+          Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value.trim()]),
+        )
+      : {}),
+  };
+
+  const signedHeadersList = Object.keys(canonicalHeaders)
+    .map((name) => name.toLowerCase())
+    .sort();
+  const signedHeaders = signedHeadersList.join(";");
+  const canonicalHeadersString = signedHeadersList.map((name) => `${name}:${canonicalHeaders[name]}`).join("\n") + "\n";
+
+  const queryParams: Record<string, string> = {
+    ...(query ?? {}),
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Credential": `${accessKeyId}/${scope}`,
+    "X-Amz-Date": amzDate,
+    "X-Amz-Expires": expires.toString(),
+    "X-Amz-SignedHeaders": signedHeaders,
+  };
+
+  if (sessionToken) {
+    queryParams["X-Amz-Security-Token"] = sessionToken;
+  }
+
+  const canonicalQuery = buildCanonicalQuery(queryParams);
+  const payloadHash = "UNSIGNED-PAYLOAD";
+  const canonicalRequest = `${method}\n${canonicalUri}\n${canonicalQuery}\n${canonicalHeadersString}\n${signedHeaders}\n${payloadHash}`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${hashSha256(canonicalRequest)}`;
+  const signingKey = getSigningKey(secretAccessKey, dateStamp, region);
+  const signature = hmacSha256(signingKey, stringToSign).toString("hex");
+
+  const finalQuery = buildCanonicalQuery({
+    ...queryParams,
+    "X-Amz-Signature": signature,
+  });
+
+  const signedUrl = new URL(url.toString());
+  signedUrl.search = finalQuery;
+  return signedUrl.toString();
+}
+
 class LocalStorageProvider implements StorageProvider {
   async createSignedUpload({
     assetId,
@@ -293,26 +482,29 @@ class SupabaseStorageProvider implements StorageProvider {
 }
 
 class S3StorageProvider implements StorageProvider {
-  private client: S3Client;
+  private readonly bucket: string;
+  private readonly region: string;
+  private readonly endpoint?: string;
+  private readonly forcePathStyle: boolean;
+  private readonly accessKeyId: string;
+  private readonly secretAccessKey: string;
+  private readonly sessionToken?: string;
 
   constructor() {
     if (!S3_BUCKET || !S3_REGION) {
       throw new Error("S3 storage is not configured");
     }
+    if (!S3_ACCESS_KEY_ID || !S3_SECRET_ACCESS_KEY) {
+      throw new Error("S3 credentials are required for S3 storage");
+    }
 
-    this.client = new S3Client({
-      region: S3_REGION,
-      endpoint: S3_ENDPOINT,
-      forcePathStyle: S3_FORCE_PATH_STYLE,
-      credentials:
-        S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY
-          ? {
-              accessKeyId: S3_ACCESS_KEY_ID,
-              secretAccessKey: S3_SECRET_ACCESS_KEY!,
-              sessionToken: S3_SESSION_TOKEN,
-            }
-          : undefined,
-    });
+    this.bucket = S3_BUCKET;
+    this.region = S3_REGION;
+    this.endpoint = S3_ENDPOINT ?? undefined;
+    this.forcePathStyle = S3_FORCE_PATH_STYLE;
+    this.accessKeyId = S3_ACCESS_KEY_ID;
+    this.secretAccessKey = S3_SECRET_ACCESS_KEY;
+    this.sessionToken = S3_SESSION_TOKEN ?? undefined;
   }
 
   async createSignedUpload({
@@ -326,10 +518,6 @@ class S3StorageProvider implements StorageProvider {
     size: number;
     projectId?: string | null;
   }): Promise<SignedUpload> {
-    if (!S3_BUCKET || !S3_REGION) {
-      throw new Error("S3 storage is not configured");
-    }
-
     ensureUploadAllowed({ contentType, size });
 
     const key = buildStoragePath({
@@ -339,24 +527,29 @@ class S3StorageProvider implements StorageProvider {
       prefix: S3_PREFIX,
     });
 
-    const command = new PutObjectCommand({
-      Bucket: S3_BUCKET,
-      Key: key,
-      ContentType: contentType,
-      ContentLength: size,
-    });
-
-    const signedUrl = await getSignedUrl(this.client, command, {
+    const uploadUrl = createPresignedS3Url({
+      method: "PUT",
+      bucket: this.bucket,
+      region: this.region,
+      key,
       expiresIn: STORAGE_SIGNED_URL_TTL_SECONDS,
+      headers: {
+        "content-type": contentType,
+      },
+      endpoint: this.endpoint,
+      forcePathStyle: this.forcePathStyle,
+      accessKeyId: this.accessKeyId,
+      secretAccessKey: this.secretAccessKey,
+      sessionToken: this.sessionToken,
     });
 
     const expiresAt = new Date(Date.now() + STORAGE_SIGNED_URL_TTL_SECONDS * 1000).toISOString();
     const assetUrl = S3_PUBLIC_BASE_URL
       ? `${S3_PUBLIC_BASE_URL.replace(/\/$/, "")}/${key}`
-      : `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com/${key}`;
+      : `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
 
     return {
-      uploadUrl: signedUrl,
+      uploadUrl,
       method: "PUT",
       headers: {
         "Content-Type": contentType,
@@ -377,10 +570,6 @@ class S3StorageProvider implements StorageProvider {
     projectId?: string | null;
     fileName?: string;
   }): Promise<SignedDownload> {
-    if (!S3_BUCKET || !S3_REGION) {
-      throw new Error("S3 storage is not configured");
-    }
-
     const key = buildStoragePath({
       assetId,
       contentType,
@@ -388,14 +577,24 @@ class S3StorageProvider implements StorageProvider {
       prefix: S3_PREFIX,
     });
 
-    const command = new GetObjectCommand({
-      Bucket: S3_BUCKET,
-      Key: key,
-      ResponseContentDisposition: fileName ? `attachment; filename="${encodeURIComponent(fileName)}"` : undefined,
-    });
+    const query = fileName
+      ? {
+          "response-content-disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+        }
+      : undefined;
 
-    const url = await getSignedUrl(this.client, command, {
+    const url = createPresignedS3Url({
+      method: "GET",
+      bucket: this.bucket,
+      region: this.region,
+      key,
       expiresIn: STORAGE_SIGNED_URL_TTL_SECONDS,
+      query,
+      endpoint: this.endpoint,
+      forcePathStyle: this.forcePathStyle,
+      accessKeyId: this.accessKeyId,
+      secretAccessKey: this.secretAccessKey,
+      sessionToken: this.sessionToken,
     });
 
     return {
