@@ -50,6 +50,39 @@ interface RequestBody {
   deliverToEmail?: string;
 }
 
+export async function GET(
+  request: Request,
+  { params }: { params: { id: string } },
+) {
+  const projectId = params.id;
+  const url = new URL(request.url);
+  const limitParam = url.searchParams.get("limit");
+  const parsedLimit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
+  const limit = Number.isFinite(parsedLimit as number) && (parsedLimit as number) > 0 ? (parsedLimit as number) : 10;
+
+  try {
+    const { user } = await requireServerAuthSession();
+    await ensureProjectMembership(projectId, user.id, { minimumRole: "member" });
+
+    const jobs = await listExportJobRecords(projectId, { limit });
+    return NextResponse.json({ jobs });
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error instanceof ProjectAuthorizationError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    console.error("Failed to load export jobs", error);
+    await captureApiException(error, {
+      route: "projects/export",
+      method: "GET",
+      status: 500,
+    });
+    return NextResponse.json({ error: "Unable to load export jobs" }, { status: 500 });
+  }
+}
+
 export async function POST(
   request: Request,
   { params }: { params: { id: string } },

@@ -9,6 +9,10 @@ import type {
 } from "@/lib/scriptDoc";
 import { useScriptDocStore } from "@/lib/state/scriptDocStore";
 
+interface ExportQueuePanelProps {
+  projectId?: string;
+}
+
 const formats: { value: ExportFormat; label: string }[] = [
   { value: "fountain", label: "Fountain" },
   { value: "fdx", label: "FDX" },
@@ -250,7 +254,13 @@ export function ExportQueuePanel() {
       setError(submitError instanceof Error ? submitError.message : "Unable to queue export");
     } finally {
       setIsSubmitting(null);
+      setRetryingJobId(null);
     }
+  };
+
+  const retryExport = async (job: ExportJob) => {
+    setRetryingJobId(job.id);
+    await queueExport(job.format, { deliverToEmail: job.deliverToEmail });
   };
 
   return (
@@ -329,14 +339,18 @@ export function ExportQueuePanel() {
                   {job.result ? (
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       <a
-                        href={job.result.downloadUrl}
-                        download={job.result.fileName}
+                        href={`/api/exports/${job.id}/download`}
                         className="inline-flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-1 text-white transition hover:border-white/40 hover:bg-white/20"
                       >
                         Download {job.result.fileName}
                       </a>
                       {job.result.notes ? (
                         <span className="text-xs text-zinc-500">{job.result.notes}</span>
+                      ) : null}
+                      {job.result.readyAt ? (
+                        <span className="text-xs text-zinc-500">
+                          Ready {new Date(job.result.readyAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                        </span>
                       ) : null}
                       {job.deliverToEmail ? (
                         <span className="text-xs text-zinc-500">

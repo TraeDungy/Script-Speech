@@ -15,6 +15,7 @@ function mapExportJobRow(row: ExportJobRow): ExportJob {
   return {
     id: row.id,
     projectId: row.project_id,
+    draftVersionId: row.draft_version_id ?? undefined,
     format: row.format,
     status: row.status,
     createdAt: row.created_at,
@@ -30,6 +31,7 @@ export async function createExportJobRecord(payload: {
   format: ExportFormat;
   scriptDoc: ScriptDoc;
   deliverToEmail?: string;
+  draftVersionId?: string | null;
 }): Promise<ExportJob> {
   if (!isSupabaseConfigured()) {
     const job = createMockExportJob(payload);
@@ -42,12 +44,16 @@ export async function createExportJobRecord(payload: {
   const record: ExportJobRow = {
     id,
     project_id: payload.projectId,
+    draft_version_id: payload.draftVersionId ?? null,
     format: payload.format,
     status: "queued",
     deliver_to_email: payload.deliverToEmail ?? null,
     script_doc: payload.scriptDoc,
     result: null,
     error: null,
+    storage_bucket: null,
+    storage_driver: null,
+    storage_path: null,
     created_at: now,
     updated_at: now,
   };
@@ -68,7 +74,9 @@ export async function createExportJobRecord(payload: {
 
 export async function updateExportJobRecord(
   jobId: string,
-  updates: Partial<Pick<ExportJobRow, "status" | "result" | "error" | "updated_at">>,
+  updates: Partial<
+    Pick<ExportJobRow, "status" | "result" | "error" | "storage_driver" | "storage_bucket" | "storage_path">
+  >,
 ): Promise<void> {
   if (!isSupabaseConfigured()) {
     const job = getMockExportJob(jobId);
@@ -78,7 +86,7 @@ export async function updateExportJobRecord(
     const merged: ExportJobRow = {
       ...job,
       ...updates,
-      updated_at: updates.updated_at ?? new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     };
     upsertMockExportJob(merged);
     return;

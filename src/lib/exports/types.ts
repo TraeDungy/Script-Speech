@@ -3,14 +3,21 @@ export type ExportFormat = "fountain" | "fdx" | "docx" | "pdf";
 export type ExportJobStatus = "queued" | "processing" | "completed" | "failed";
 
 export interface ExportJobResult {
-  downloadUrl: string;
   fileName: string;
   notes?: string;
+  readyAt?: string;
+  downloadUrl?: string;
+  storageDriver?: "supabase" | "s3" | "local";
+  storageBucket?: string;
+  storagePath?: string;
+  contentType?: string;
+  size?: number;
 }
 
 export interface ExportJob {
   id: string;
   projectId: string;
+  draftVersionId?: string;
   format: ExportFormat;
   status: ExportJobStatus;
   createdAt: string;
