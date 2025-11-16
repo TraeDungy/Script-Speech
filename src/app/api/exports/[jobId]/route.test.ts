@@ -11,6 +11,30 @@ vi.mock("@/lib/exports", () => exportsModule);
 
 const mockGetExportJob = exportsModule.getExportJob;
 
+const authModule = vi.hoisted(() => {
+  class UnauthorizedError extends Error {}
+  return {
+    requireServerAuthSession: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
+    UnauthorizedError,
+  };
+});
+
+vi.mock("@/lib/auth/server", () => authModule);
+
+const mockRequireServerAuthSession = authModule.requireServerAuthSession;
+
+const authzModule = vi.hoisted(() => {
+  class ProjectAuthorizationError extends Error {}
+  return {
+    ensureProjectMembership: vi.fn(),
+    ProjectAuthorizationError,
+  };
+});
+
+vi.mock("@/lib/authz/projects.server", () => authzModule);
+
+const mockEnsureProjectMembership = authzModule.ensureProjectMembership;
+
 const observabilityModule = vi.hoisted(() => ({
   recordApiRequest: vi.fn(),
   recordApiError: vi.fn(),
@@ -38,6 +62,8 @@ const buildJob = (status: "queued" | "processing" | "completed" | "failed") => (
 beforeEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
+  mockRequireServerAuthSession.mockResolvedValue({ user: { id: "user-1" } });
+  mockEnsureProjectMembership.mockResolvedValue(undefined);
 });
 
 describe("/api/exports/[jobId]", () => {
@@ -60,7 +86,7 @@ describe("/api/exports/[jobId]", () => {
 
   it("streams job updates over SSE", async () => {
     vi.useFakeTimers();
-    const states = [buildJob("queued"), buildJob("completed")];
+    const states = [buildJob("queued"), buildJob("queued"), buildJob("completed")];
     let index = 0;
     mockGetExportJob.mockImplementation(async () => states[Math.min(index++, states.length - 1)]);
 

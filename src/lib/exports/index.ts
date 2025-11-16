@@ -1,5 +1,7 @@
 import { Buffer } from "node:buffer";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
+import { createDraftVersionRecord } from "@/lib/db/draftVersions";
 import {
   createExportJobRecord,
   fetchExportJobRecord,
@@ -7,6 +9,18 @@ import {
 } from "@/lib/db/exportJobs";
 import { logStructuredEvent, recordFlowMetric, withSpan } from "@/lib/observability";
 import type { ExportFormat, ExportJob, ScriptDoc } from "./types";
+import { getSupabaseServiceClient } from "@/lib/supabase.server";
+import {
+  S3_ACCESS_KEY_ID,
+  S3_BUCKET,
+  S3_ENDPOINT,
+  S3_FORCE_PATH_STYLE,
+  S3_PREFIX,
+  S3_REGION,
+  S3_SECRET_ACCESS_KEY,
+  S3_SESSION_TOKEN,
+  SUPABASE_STORAGE_BUCKET,
+} from "@/lib/storage/config";
 
 export type ExportQueuePayload = {
   projectId: string;
@@ -22,27 +36,38 @@ type RenderedExportResult = {
   notes?: string;
 };
 
-class ExportJobQueue {
-  private inflight = new Map<string, ExportQueuePayload>();
+type StoredArtifact = {
+  downloadUrl?: string;
+  storageDriver?: "supabase" | "s3" | "local";
+  storageBucket?: string;
+  storagePath?: string;
+  contentType: string;
+  size: number;
+};
+
+const EXPORT_STORAGE_BUCKET = process.env.EXPORT_STORAGE_BUCKET?.trim() || SUPABASE_STORAGE_BUCKET;
+const EXPORT_STORAGE_FOLDER = process.env.EXPORT_STORAGE_FOLDER?.trim() || "exports";
+const EXPORT_S3_BUCKET = process.env.EXPORT_S3_BUCKET?.trim() || S3_BUCKET;
+const EXPORT_S3_PREFIX =
+  process.env.EXPORT_S3_PREFIX?.trim() || (S3_PREFIX ? `${S3_PREFIX.replace(/\/$/, "")}/exports` : "exports");
+
+class LocalExportQueue {
+  private payloads = new Map<string, ExportQueuePayload & { draftVersionId?: string | null }>();
 
   async enqueue(payload: ExportQueuePayload): Promise<ExportJob> {
-    return withSpan(
-      {
-        name: "exports.job.enqueue",
-        attributes: { format: payload.format, projectId: payload.projectId },
-      },
-      async () => {
-        const job = await createExportJobRecord(payload);
-        this.inflight.set(job.id, payload);
-        recordFlowMetric("export_jobs_total", "Count of export jobs", {
-          stage: "queued",
-          format: payload.format,
-        });
-        logStructuredEvent({
-          level: "info",
-          message: "export.job.queued",
-          context: { jobId: job.id, projectId: job.projectId, format: job.format },
-        });
+    const draft = await createDraftVersionRecord({ projectId: payload.projectId, doc: payload.scriptDoc });
+    const job = await createExportJobRecord({
+      ...payload,
+      draftVersionId: draft.id,
+    });
+
+    this.payloads.set(job.id, { ...payload, draftVersionId: draft.id });
+
+    setTimeout(() => {
+      void this.processJob(job.id).catch((error) => {
+        console.error("Export job failed", error);
+      });
+    }, 25);
 
         setTimeout(() => {
           void this.process(job.id).catch((error) => {
@@ -64,50 +89,38 @@ class ExportJobQueue {
     return fetchExportJobRecord(jobId);
   }
 
-  private async process(jobId: string): Promise<void> {
-    const payload = this.inflight.get(jobId);
+  private async processJob(jobId: string): Promise<void> {
+    const payload = this.payloads.get(jobId);
     if (!payload) {
       return;
     }
 
+    await updateExportJobRecord(jobId, { status: "processing" });
+
     try {
-      await withSpan(
-        {
-          name: "exports.job.process",
-          attributes: { jobId, format: payload.format, projectId: payload.projectId },
+      const rendered = await renderExport(payload);
+      const fileName = buildFileName(payload.projectId, rendered.extension);
+      const artifact = await persistExportArtifact(jobId, payload, rendered);
+      const readyAt = new Date().toISOString();
+
+      await updateExportJobRecord(jobId, {
+        status: "completed",
+        result: {
+          fileName,
+          notes: rendered.notes,
+          readyAt,
+          downloadUrl: artifact.downloadUrl,
+          storageDriver: artifact.storageDriver,
+          storageBucket: artifact.storageBucket,
+          storagePath: artifact.storagePath,
+          contentType: artifact.contentType,
+          size: artifact.size,
         },
-        async (span) => {
-          await updateExportJobRecord(jobId, { status: "processing" });
-          recordFlowMetric("export_jobs_total", "Count of export jobs", {
-            stage: "processing",
-            format: payload.format,
-          });
-
-          const rendered = await renderExport(payload);
-          const fileName = buildFileName(payload.projectId, rendered.extension);
-
-          await updateExportJobRecord(jobId, {
-            status: "completed",
-            result: {
-              fileName,
-              downloadUrl: createDataUrl(rendered.buffer, rendered.mime),
-              notes: rendered.notes,
-            },
-            error: null,
-          });
-
-          recordFlowMetric("export_jobs_total", "Count of export jobs", {
-            stage: "completed",
-            format: payload.format,
-          });
-          span.setAttribute("export.result.extension", rendered.extension);
-          logStructuredEvent({
-            level: "info",
-            message: "export.job.completed",
-            context: { jobId, projectId: payload.projectId, format: payload.format },
-          });
-        },
-      );
+        error: null,
+        storage_driver: artifact.storageDriver ?? null,
+        storage_bucket: artifact.storageBucket ?? null,
+        storage_path: artifact.storagePath ?? null,
+      });
     } catch (error) {
       recordFlowMetric("export_jobs_total", "Count of export jobs", {
         stage: "failed",
@@ -117,40 +130,39 @@ class ExportJobQueue {
         status: "failed",
         error: error instanceof Error ? error.message : "Export failed",
       });
-      throw error;
     } finally {
-      this.inflight.delete(jobId);
+      this.payloads.delete(jobId);
     }
   }
 }
 
-const queueRef = globalThis as typeof globalThis & { __scriptSpeechExportQueue?: ExportJobQueue };
+const queueGlobal = globalThis as typeof globalThis & {
+  __scriptSpeechExportQueue?: LocalExportQueue;
+};
 
-function getQueue(): ExportJobQueue {
-  if (!queueRef.__scriptSpeechExportQueue) {
-    queueRef.__scriptSpeechExportQueue = new ExportJobQueue();
+function getExportQueue(): LocalExportQueue {
+  if (!queueGlobal.__scriptSpeechExportQueue) {
+    queueGlobal.__scriptSpeechExportQueue = new LocalExportQueue();
   }
-  return queueRef.__scriptSpeechExportQueue;
+  return queueGlobal.__scriptSpeechExportQueue;
 }
 
 export function enqueueExportJob(payload: ExportQueuePayload): Promise<ExportJob> {
-  return getQueue().enqueue(payload);
+  return getExportQueue().enqueue(payload);
 }
 
 export function getExportJob(jobId: string): Promise<ExportJob | null> {
-  return getQueue().getJob(jobId);
+  return getExportQueue().getJob(jobId);
 }
 
 async function renderExport(payload: ExportQueuePayload): Promise<RenderedExportResult> {
-  await wait(650 + Math.random() * 400);
-
   switch (payload.format) {
     case "fountain":
       return {
         buffer: Buffer.from(scriptDocToFountain(payload.scriptDoc), "utf8"),
         extension: "fountain",
         mime: "text/plain;charset=utf-8",
-        notes: "Generated from script document",
+        notes: "Generated from ScriptDoc snapshot",
       };
     case "fdx":
       return {
@@ -164,18 +176,107 @@ async function renderExport(payload: ExportQueuePayload): Promise<RenderedExport
         buffer: scriptDocToDocx(payload.scriptDoc),
         extension: "docx",
         mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        notes: "Minimal WordprocessingML payload",
+        notes: "WordprocessingML placeholder",
       };
     case "pdf":
       return {
         buffer: scriptDocToPdf(payload.scriptDoc),
         extension: "pdf",
         mime: "application/pdf",
-        notes: "Stub PDF content for preview flows",
+        notes: "Stub PDF preview",
       };
     default:
       throw new Error(`Unsupported export format: ${payload.format}`);
   }
+}
+
+async function persistExportArtifact(
+  jobId: string,
+  payload: ExportQueuePayload,
+  rendered: RenderedExportResult,
+): Promise<StoredArtifact> {
+  const supabase = getSupabaseServiceClient();
+  if (supabase && EXPORT_STORAGE_BUCKET) {
+    const path = buildStoragePath(payload.projectId, jobId, rendered.extension, EXPORT_STORAGE_FOLDER);
+    const { error } = await supabase.storage.from(EXPORT_STORAGE_BUCKET).upload(path, rendered.buffer, {
+      contentType: rendered.mime,
+      upsert: true,
+    });
+    if (!error) {
+      return {
+        storageDriver: "supabase",
+        storageBucket: EXPORT_STORAGE_BUCKET,
+        storagePath: path,
+        contentType: rendered.mime,
+        size: rendered.buffer.byteLength,
+      };
+    }
+    console.error("Failed to upload export artifact to Supabase storage", error);
+  }
+
+  const s3Client = getS3ExportClient();
+  if (s3Client && EXPORT_S3_BUCKET) {
+    const key = buildStoragePath(payload.projectId, jobId, rendered.extension, EXPORT_S3_PREFIX);
+    try {
+      await s3Client.send(
+        new PutObjectCommand({
+          Bucket: EXPORT_S3_BUCKET,
+          Key: key,
+          Body: rendered.buffer,
+          ContentType: rendered.mime,
+          ContentLength: rendered.buffer.byteLength,
+        }),
+      );
+      return {
+        storageDriver: "s3",
+        storageBucket: EXPORT_S3_BUCKET,
+        storagePath: key,
+        contentType: rendered.mime,
+        size: rendered.buffer.byteLength,
+      };
+    } catch (error) {
+      console.error("Failed to upload export artifact to S3", error);
+    }
+  }
+
+  return {
+    downloadUrl: createDataUrl(rendered.buffer, rendered.mime),
+    storageDriver: "local",
+    contentType: rendered.mime,
+    size: rendered.buffer.byteLength,
+  };
+}
+
+function buildStoragePath(projectId: string, jobId: string, extension: string, prefix: string): string {
+  const safeProject = projectId.replace(/[^a-z0-9-]+/gi, "-").toLowerCase();
+  const safePrefix = prefix.replace(/\/+$/, "");
+  return `${safePrefix}/${safeProject}/${jobId}.${extension}`;
+}
+
+let s3Client: S3Client | null = null;
+
+function getS3ExportClient(): S3Client | null {
+  if (!EXPORT_S3_BUCKET || !S3_REGION) {
+    return null;
+  }
+
+  if (!s3Client) {
+    s3Client = new S3Client({
+      region: S3_REGION,
+      endpoint: S3_ENDPOINT,
+      forcePathStyle: S3_FORCE_PATH_STYLE,
+      credentials:
+        S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY
+          ? {
+              accessKeyId: S3_ACCESS_KEY_ID,
+              secretAccessKey: S3_SECRET_ACCESS_KEY!,
+              sessionToken: S3_SESSION_TOKEN,
+            }
+          : undefined,
+    });
+  }
+
+  return s3Client;
 }
 
 function linesFromScriptDoc(doc: ScriptDoc): string[] {
@@ -269,3 +370,97 @@ function buildFileName(projectId: string, extension: string): string {
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+class LocalExportQueue {
+  private payloads = new Map<string, ExportQueuePayload>();
+
+  async enqueue(payload: ExportQueuePayload): Promise<ExportJob> {
+    const job = await createExportJobRecord(payload);
+    this.payloads.set(job.id, payload);
+    setTimeout(() => {
+      void this.processJob(job.id).catch((error) => {
+        console.error("Export job processing failed", error);
+      });
+    }, 10);
+    return job;
+  }
+
+  async getJob(jobId: string): Promise<ExportJob | null> {
+    return fetchExportJobRecord(jobId);
+  }
+
+  private async processJob(jobId: string): Promise<void> {
+    const payload = this.payloads.get(jobId);
+    if (!payload) {
+      return;
+    }
+
+    await updateExportJobRecord(jobId, { status: "processing" });
+
+    try {
+      const rendered = await renderExport(payload);
+      const fileName = buildFileName(payload.projectId, rendered.extension);
+      await updateExportJobRecord(jobId, {
+        status: "completed",
+        result: {
+          fileName,
+          downloadUrl: createDataUrl(rendered.buffer, rendered.mime),
+          notes: rendered.notes,
+        },
+        error: null,
+      });
+    } catch (error) {
+      await updateExportJobRecord(jobId, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Export failed",
+      });
+    } finally {
+      this.payloads.delete(jobId);
+    }
+  }
+}
+
+const globalQueueRef = globalThis as typeof globalThis & {
+  __scriptSpeechExportQueue?: LocalExportQueue;
+};
+
+export function getExportQueue(): LocalExportQueue {
+  if (!globalQueueRef.__scriptSpeechExportQueue) {
+    globalQueueRef.__scriptSpeechExportQueue = new LocalExportQueue();
+  }
+  return globalQueueRef.__scriptSpeechExportQueue;
+}
+
+export function enqueueExportJob(payload: ExportQueuePayload): Promise<ExportJob> {
+  return getExportQueue().enqueue(payload);
+}
+
+export function getExportJob(jobId: string): Promise<ExportJob | null> {
+  return getExportQueue().getJob(jobId);
+}
+
+let sharedQueue: ExportQueue | LocalExportQueue | null = null;
+
+export function getExportQueue(): ExportQueue | LocalExportQueue {
+  if (sharedQueue) {
+    return sharedQueue;
+  }
+
+  sharedQueue = isSupabaseConfigured() ? new ExportQueue() : getLocalExportQueue();
+  return sharedQueue;
+}
+
+export async function enqueueExportJob(payload: EnqueuePayload): Promise<ExportJob> {
+  const queue = getExportQueue();
+  return queue.enqueue(payload);
+}
+
+export async function getExportJob(jobId: string): Promise<ExportJob | null> {
+  const queue = getExportQueue();
+  return queue.getJob(jobId);
+}
+
+export function formatSseEvent(event: string, data: string): string {
+  return `event: ${event}\ndata: ${data}\n\n`;
+}
+

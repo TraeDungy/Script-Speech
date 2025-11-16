@@ -273,9 +273,15 @@ export async function createScriptDocAutosave(
     record_type: ScriptDocRecordType;
   };
 
+  await supabase
+    .from<ScriptDocRow>("script_docs")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("record_type", "autosave");
+
   const { data, error } = await supabase
     .from<ScriptDocRow>("script_docs")
-    .upsert(payload, { onConflict: "project_id", ignoreDuplicates: false })
+    .insert(payload)
     .select("*")
     .single();
 

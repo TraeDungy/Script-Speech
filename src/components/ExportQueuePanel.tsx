@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ExportFormat, ExportJob } from "@/lib/exports/types";
+import type { ExportFormat, ExportJob, ScriptDoc as ExportScriptDoc } from "@/lib/exports/types";
+import type {
+  ScriptDoc as StudioScriptDoc,
+  ScriptScene,
+  ScriptSceneElement,
+} from "@/lib/scriptDoc";
+import { useScriptDocStore } from "@/lib/state/scriptDocStore";
+
+interface ExportQueuePanelProps {
+  projectId?: string;
+}
 
 const formats: { value: ExportFormat; label: string }[] = [
   { value: "fountain", label: "Fountain" },
@@ -9,39 +19,6 @@ const formats: { value: ExportFormat; label: string }[] = [
   { value: "docx", label: "DOCX" },
   { value: "pdf", label: "PDF" },
 ];
-
-const demoScriptDoc = {
-  title: "Studio Canvas Demo",
-  logline: "A director and Script Speech iterate on a scene live in the control room.",
-  scenes: [
-    {
-      heading: "INT. CONTROL ROOM - NIGHT",
-      action:
-        "Monitors glow over the monochrome console as waveform meters dance in sync with whispered direction.",
-      dialogue: [
-        {
-          character: "DIRECTOR",
-          text: "Let's lock the reveal to the second beat and keep the camera floating.",
-        },
-        {
-          character: "SCRIPT SPEECH",
-          parenthetical: "calm",
-          text: "Copy. Updating beat two and readying exports for review.",
-        },
-      ],
-    },
-    {
-      heading: "INT. STAGE - CONTINUOUS",
-      action: "Overhead rigs sweep as the set resets for another take in amber light.",
-      dialogue: [
-        {
-          character: "DIRECTOR",
-          text: "Flag this pass for reference and send me the fountain draft.",
-        },
-      ],
-    },
-  ],
-};
 
 type JobsState = Record<string, ExportJob>;
 
@@ -74,23 +51,134 @@ const statusStyles: Record<ExportJob["status"], StatusStyle> = {
   },
 };
 
+const convertSceneSlugline = (scene: ScriptScene) =>
+  `${scene.slugline.setting}. ${scene.slugline.location} - ${scene.slugline.timeOfDay}`;
+
+const collectActionText = (elements: ScriptSceneElement[]) =>
+  elements
+    .filter((element) => element.type === "action")
+    .map((element) => element.text)
+    .join("\n\n")
+    .trim();
+
+const collectDialogue = (elements: ScriptSceneElement[]) => {
+  const dialogue: NonNullable<ExportScriptDoc["scenes"][number]["dialogue"]> = [];
+  let pendingParenthetical: string | undefined;
+
+  for (const element of elements) {
+    if (element.type === "parenthetical") {
+      pendingParenthetical = element.text;
+      continue;
+    }
+
+    if (element.type === "dialogue") {
+      dialogue.push({
+        character: element.speaker,
+        text: element.text,
+        parenthetical: element.parenthetical ?? pendingParenthetical ?? undefined,
+      });
+      pendingParenthetical = undefined;
+    }
+  }
+
+  return dialogue.length ? dialogue : undefined;
+};
+
+const convertScriptDocForExport = (doc: StudioScriptDoc | null): ExportScriptDoc | null => {
+  if (!doc) {
+    return null;
+  }
+
+  const scenes = doc.scenes.map((scene) => {
+    const action = collectActionText(scene.elements);
+    return {
+      heading: convertSceneSlugline(scene),
+      action: action || undefined,
+      dialogue: collectDialogue(scene.elements),
+    } satisfies ExportScriptDoc["scenes"][number];
+  });
+
+  return {
+    title: doc.metadata?.title,
+    logline: doc.metadata?.logline,
+    scenes,
+  } satisfies ExportScriptDoc;
+};
+
 export function ExportQueuePanel() {
   const [jobs, setJobs] = useState<JobsState>({});
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState<ExportFormat | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+  const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const jobIdsRef = useRef<string[]>([]);
+  const doc = useScriptDocStore((state) => state.doc);
+  const projectId = doc.metadata?.projectId ?? "";
+  const exportDoc = useMemo(() => convertScriptDocForExport(doc), [doc]);
 
   const orderedJobs = useMemo(() => {
     return Object.values(jobs).sort((a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
   }, [jobs]);
 
   useEffect(() => {
+    jobIdsRef.current = [];
+    setJobs({});
+    setJobsError(null);
+
+    if (!projectId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadJobs() {
+      setIsLoadingJobs(true);
+      setJobsError(null);
+      try {
+        const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export`, {
+          credentials: "include",
+        });
+        if (!response.ok) {
+          throw new Error("Failed to load export queue");
+        }
+        const payload = (await response.json()) as { jobs: ExportJob[] };
+        if (!cancelled) {
+          const nextJobs: JobsState = {};
+          const ids: string[] = [];
+          for (const job of payload.jobs) {
+            nextJobs[job.id] = job;
+            ids.push(job.id);
+          }
+          jobIdsRef.current = ids;
+          setJobs(nextJobs);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setJobsError(
+            loadError instanceof Error ? loadError.message : "Unable to load export queue",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingJobs(false);
+        }
+      }
+    }
+
+    void loadJobs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
     const interval = setInterval(async () => {
-      if (!jobIdsRef.current.length) {
+      if (!jobIdsRef.current.length || !projectId) {
         return;
       }
 
@@ -108,7 +196,7 @@ export function ExportQueuePanel() {
           } catch (pollError) {
             console.error("Failed to poll export job", pollError);
           }
-        })
+        }),
       );
 
       if (updatedJobs.length) {
@@ -123,22 +211,28 @@ export function ExportQueuePanel() {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [projectId]);
 
   const queueExport = async (format: ExportFormat) => {
+    if (!projectId || !exportDoc) {
+      setError("Project data is still loading. Please try again shortly.");
+      return;
+    }
+
     setIsSubmitting(format);
     setMessage(null);
     setError(null);
 
     try {
-      const response = await fetch(`/api/projects/demo-project/export`, {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({
           format,
-          scriptDoc: demoScriptDoc,
+          scriptDoc: exportDoc,
           deliverToEmail: email.trim() ? email.trim() : undefined,
         }),
       });
@@ -154,13 +248,19 @@ export function ExportQueuePanel() {
       setMessage(
         job.deliverToEmail
           ? "Export queued. We will email the download link when it is ready."
-          : "Export queued. Keep an eye on the queue for download links."
+          : "Export queued. Keep an eye on the queue for download links.",
       );
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to queue export");
     } finally {
       setIsSubmitting(null);
+      setRetryingJobId(null);
     }
+  };
+
+  const retryExport = async (job: ExportJob) => {
+    setRetryingJobId(job.id);
+    await queueExport(job.format, { deliverToEmail: job.deliverToEmail });
   };
 
   return (
@@ -191,7 +291,9 @@ export function ExportQueuePanel() {
               key={formatOption.value}
               type="button"
               onClick={() => queueExport(formatOption.value)}
-              disabled={isSubmitting !== null}
+              disabled={
+                isSubmitting !== null || !projectId || !exportDoc || isLoadingJobs || Boolean(jobsError)
+              }
               className="rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:border-white/40 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSubmitting === formatOption.value ? "Queuing…" : `Queue ${formatOption.label}`}
@@ -200,13 +302,17 @@ export function ExportQueuePanel() {
         </div>
         {message ? <p className="text-sm text-emerald-200">{message}</p> : null}
         {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+        {jobsError ? <p className="text-sm text-rose-300">{jobsError}</p> : null}
       </div>
 
       <div className="space-y-3">
-        <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Active jobs</p>
+        <div className="flex items-center justify-between text-xs uppercase tracking-[0.35em] text-zinc-500">
+          <span>Active jobs</span>
+          {isLoadingJobs ? <span className="text-[0.6rem] text-zinc-400">Loading…</span> : null}
+        </div>
         {orderedJobs.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-zinc-500">
-            Queue an export to see progress updates here.
+            {projectId ? "Queue an export to see progress updates here." : "Project data is still loading."}
           </p>
         ) : (
           <ul className="space-y-4">
@@ -233,14 +339,18 @@ export function ExportQueuePanel() {
                   {job.result ? (
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       <a
-                        href={job.result.downloadUrl}
-                        download={job.result.fileName}
+                        href={`/api/exports/${job.id}/download`}
                         className="inline-flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-1 text-white transition hover:border-white/40 hover:bg-white/20"
                       >
                         Download {job.result.fileName}
                       </a>
                       {job.result.notes ? (
                         <span className="text-xs text-zinc-500">{job.result.notes}</span>
+                      ) : null}
+                      {job.result.readyAt ? (
+                        <span className="text-xs text-zinc-500">
+                          Ready {new Date(job.result.readyAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                        </span>
                       ) : null}
                       {job.deliverToEmail ? (
                         <span className="text-xs text-zinc-500">
@@ -249,15 +359,17 @@ export function ExportQueuePanel() {
                       ) : null}
                     </div>
                   ) : null}
-                  {job.error ? (
-                    <p className="text-sm text-rose-300">{job.error}</p>
-                  ) : null}
+                  {job.error ? <p className="text-sm text-rose-300">{job.error}</p> : null}
                 </li>
               );
             })}
           </ul>
         )}
       </div>
+
+      {projectId && (
+        <p className="text-[0.65rem] uppercase tracking-[0.3em] text-zinc-500">Project: {projectId}</p>
+      )}
     </div>
   );
 }
