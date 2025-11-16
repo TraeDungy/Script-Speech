@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getExportJob } from "@/lib/exports";
+import { formatSseEvent, getExportJob } from "@/lib/exports";
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
 import {
   ensureProjectMembership,
