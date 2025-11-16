@@ -40,6 +40,15 @@ export interface ScriptDocRow {
   updated_at: string;
 }
 
+export interface DraftVersionRow {
+  id: string;
+  project_id: string;
+  doc: ScriptDoc;
+  summary: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
 export interface BeatRow {
   id: string;
   project_id: string;
@@ -119,18 +128,38 @@ export interface EntityAssetRow {
 export interface ExportJobRow {
   id: string;
   project_id: string;
+  draft_version_id: string | null;
   format: ExportFormat;
   status: ExportJobStatus;
   deliver_to_email: string | null;
   script_doc: ScriptDoc;
   result: {
-    downloadUrl: string;
     fileName: string;
     notes?: string;
+    downloadUrl?: string;
+    storageDriver?: string;
+    storageBucket?: string;
+    storagePath?: string;
+    contentType?: string;
+    size?: number;
+    readyAt?: string;
   } | null;
   error: string | null;
+  storage_driver: string | null;
+  storage_path: string | null;
+  storage_bucket: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ExportDownloadTokenRow {
+  id: string;
+  job_id: string;
+  token: string;
+  signed_url: string;
+  expires_at: string;
+  created_by: string | null;
+  created_at: string;
 }
 
 export type MarketingContentStatus = "draft" | "published" | "archived";

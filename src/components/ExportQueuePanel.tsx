@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ExportFormat, ExportJob } from "@/lib/exports/types";
 
+interface ExportQueuePanelProps {
+  projectId?: string;
+}
+
 const formats: { value: ExportFormat; label: string }[] = [
   { value: "fountain", label: "Fountain" },
   { value: "fdx", label: "FDX" },
@@ -74,12 +78,15 @@ const statusStyles: Record<ExportJob["status"], StatusStyle> = {
   },
 };
 
-export function ExportQueuePanel() {
+const DEFAULT_PROJECT_ID = "demo-project";
+
+export function ExportQueuePanel({ projectId = DEFAULT_PROJECT_ID }: ExportQueuePanelProps) {
   const [jobs, setJobs] = useState<JobsState>({});
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState<ExportFormat | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const jobIdsRef = useRef<string[]>([]);
 
   const orderedJobs = useMemo(() => {
@@ -87,6 +94,37 @@ export function ExportQueuePanel() {
       new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
   }, [jobs]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrate() {
+      try {
+        const response = await fetch(`/api/projects/${projectId}/export`);
+        if (!response.ok) {
+          return;
+        }
+        const data = await response.json();
+        if (cancelled || !Array.isArray(data.jobs)) {
+          return;
+        }
+        const nextJobs: JobsState = {};
+        for (const job of data.jobs as ExportJob[]) {
+          nextJobs[job.id] = job;
+        }
+        jobIdsRef.current = Object.keys(nextJobs);
+        setJobs(nextJobs);
+      } catch (hydrateError) {
+        console.error("Failed to hydrate export jobs", hydrateError);
+      }
+    }
+
+    void hydrate();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -125,13 +163,13 @@ export function ExportQueuePanel() {
     return () => clearInterval(interval);
   }, []);
 
-  const queueExport = async (format: ExportFormat) => {
+  const queueExport = async (format: ExportFormat, options?: { deliverToEmail?: string }) => {
     setIsSubmitting(format);
     setMessage(null);
     setError(null);
 
     try {
-      const response = await fetch(`/api/projects/demo-project/export`, {
+      const response = await fetch(`/api/projects/${projectId}/export`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -139,7 +177,7 @@ export function ExportQueuePanel() {
         body: JSON.stringify({
           format,
           scriptDoc: demoScriptDoc,
-          deliverToEmail: email.trim() ? email.trim() : undefined,
+          deliverToEmail: options?.deliverToEmail ?? (email.trim() ? email.trim() : undefined),
         }),
       });
 
@@ -160,7 +198,13 @@ export function ExportQueuePanel() {
       setError(submitError instanceof Error ? submitError.message : "Unable to queue export");
     } finally {
       setIsSubmitting(null);
+      setRetryingJobId(null);
     }
+  };
+
+  const retryExport = async (job: ExportJob) => {
+    setRetryingJobId(job.id);
+    await queueExport(job.format, { deliverToEmail: job.deliverToEmail });
   };
 
   return (
@@ -233,14 +277,18 @@ export function ExportQueuePanel() {
                   {job.result ? (
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       <a
-                        href={job.result.downloadUrl}
-                        download={job.result.fileName}
+                        href={`/api/exports/${job.id}/download`}
                         className="inline-flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-1 text-white transition hover:border-white/40 hover:bg-white/20"
                       >
                         Download {job.result.fileName}
                       </a>
                       {job.result.notes ? (
                         <span className="text-xs text-zinc-500">{job.result.notes}</span>
+                      ) : null}
+                      {job.result.readyAt ? (
+                        <span className="text-xs text-zinc-500">
+                          Ready {new Date(job.result.readyAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                        </span>
                       ) : null}
                       {job.deliverToEmail ? (
                         <span className="text-xs text-zinc-500">
@@ -250,7 +298,17 @@ export function ExportQueuePanel() {
                     </div>
                   ) : null}
                   {job.error ? (
-                    <p className="text-sm text-rose-300">{job.error}</p>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <p className="text-sm text-rose-300">{job.error}</p>
+                      <button
+                        type="button"
+                        onClick={() => retryExport(job)}
+                        disabled={retryingJobId === job.id || isSubmitting !== null}
+                        className="text-xs font-semibold uppercase tracking-[0.2em] text-white/70 hover:text-white disabled:opacity-60"
+                      >
+                        {retryingJobId === job.id ? "Retrying…" : "Retry job"}
+                      </button>
+                    </div>
                   ) : null}
                 </li>
               );

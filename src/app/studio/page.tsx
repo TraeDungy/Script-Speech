@@ -974,7 +974,7 @@ export default function StudioPage() {
               ))}
             </ul>
           </div>
-          <ExportQueuePanel />
+          <ExportQueuePanel projectId={DEFAULT_PROJECT_ID} />
         </aside>
       </section>
     </main>
