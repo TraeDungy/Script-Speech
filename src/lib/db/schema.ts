@@ -1,21 +1,9 @@
 import type { ScriptDoc } from "@/lib/scriptDoc";
 import type { EntityAssetTargetType } from "@/lib/types/assets";
 import type { ExportFormat, ExportJobStatus } from "@/lib/exports/types";
+import type { Tables } from "./generated.types";
 
-export interface ProjectRow {
-  id: string;
-  title: string;
-  script_type: string;
-  genre: string | null;
-  logline: string | null;
-  status: "outline" | "draft" | "polish" | "locked";
-  created_at: string;
-  updated_at: string;
-  owner_id: string | null;
-  tags: string[] | null;
-  target_length_unit: "pages" | "minutes" | "seconds" | null;
-  target_length_value: number | null;
-}
+export type ProjectRow = Tables<"projects">;
 
 export interface ProjectMemberRow {
   id: string;
@@ -28,16 +16,10 @@ export interface ProjectMemberRow {
   updated_at: string;
 }
 
-export interface ScriptDocRow {
-  id: string;
-  project_id: string;
+type GeneratedScriptDocRow = Tables<"script_docs">;
+
+export interface ScriptDocRow extends Omit<GeneratedScriptDocRow, "doc"> {
   doc: ScriptDoc;
-  revision_id: string | null;
-  record_type: "version" | "autosave";
-  version_number: number | null;
-  source_version_id: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface DraftVersionRow {
@@ -125,31 +107,18 @@ export interface EntityAssetRow {
   updated_at: string;
 }
 
-export interface ExportJobRow {
-  id: string;
-  project_id: string;
-  draft_version_id: string | null;
-  format: ExportFormat;
-  status: ExportJobStatus;
-  deliver_to_email: string | null;
+type ExportJobRowResult = {
+  downloadUrl: string;
+  fileName: string;
+  notes?: string;
+};
+
+type GeneratedExportJobRow = Tables<"export_jobs">;
+
+export interface ExportJobRow
+  extends Omit<GeneratedExportJobRow, "script_doc" | "result"> {
   script_doc: ScriptDoc;
-  result: {
-    fileName: string;
-    notes?: string;
-    downloadUrl?: string;
-    storageDriver?: string;
-    storageBucket?: string;
-    storagePath?: string;
-    contentType?: string;
-    size?: number;
-    readyAt?: string;
-  } | null;
-  error: string | null;
-  storage_driver: string | null;
-  storage_path: string | null;
-  storage_bucket: string | null;
-  created_at: string;
-  updated_at: string;
+  result: ExportJobRowResult | null;
 }
 
 export interface ExportDownloadTokenRow {
@@ -173,6 +142,58 @@ export interface MarketingContentRow<T = unknown> {
   author_name: string | null;
   author_email: string | null;
   published_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProjectSessionStatus = "collecting" | "confirmed" | "abandoned";
+
+export interface ProjectSessionRow {
+  id: string;
+  project_id: string;
+  user_id: string;
+  status: ProjectSessionStatus;
+  slots: Record<string, unknown> | null;
+  summary: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectSlotEntryRow {
+  id: string;
+  project_id: string;
+  session_id: string;
+  slot_name: string;
+  value_text: string | null;
+  value_json: Record<string, unknown> | unknown[] | string | number | null;
+  source: "api" | "text" | "voice" | "import";
+  confidence: number | null;
+  captured_at: string;
+  updated_at: string;
+}
+
+export interface ProjectTranscriptRow {
+  id: string;
+  project_id: string;
+  session_id: string | null;
+  speaker: string;
+  transcript: string;
+  source: string;
+  confidence: number | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface ScriptSpecRow {
+  project_id: string;
+  format: string | null;
+  tone_keywords: string[] | null;
+  constraint_notes: string | null;
+  structural_preferences: Record<string, unknown> | null;
+  rating: string | null;
+  custom_constraints: Record<string, unknown> | null;
+  captured_from_session_id: string | null;
+  captured_by: string | null;
   created_at: string;
   updated_at: string;
 }

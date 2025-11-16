@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { enqueueExportJob, type ExportQueuePayload } from "@/lib/exports";
-import type { ExportFormat, ScriptDoc } from "@/lib/exports/types";
+import type { ExportQueuePayload } from "@/lib/exports";
+import { enqueueExportJob } from "@/lib/exports";
+import type { ExportFormat } from "@/lib/exports/types";
+import { listExportJobsForProject } from "@/lib/db/exportJobs";
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
 import {
   ensureProjectMembership,
@@ -9,8 +11,38 @@ import {
 } from "@/lib/authz/projects.server";
 import { enforceRateLimit } from "@/lib/rateLimit";
 import { logAuditEvent } from "@/lib/auditLog";
-import { captureApiException, recordApiError } from "@/lib/observability";
-import { listExportJobRecords } from "@/lib/db/exportJobs";
+import {
+  captureApiException,
+  recordApiError,
+} from "@/lib/observability";
+
+export async function GET(
+  _request: Request,
+  { params }: { params: { id: string } },
+) {
+  const projectId = params.id;
+
+  try {
+    const { user } = await requireServerAuthSession();
+    await ensureProjectMembership(projectId, user.id, { minimumRole: "member" });
+
+    const jobs = await listExportJobsForProject(projectId, { limit: 25 });
+    return NextResponse.json({ jobs });
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      recordApiError("projects/export", "GET", 401);
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (error instanceof ProjectAuthorizationError) {
+      recordApiError("projects/export", "GET", 403);
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    console.error("Failed to list export jobs", error);
+    recordApiError("projects/export", "GET", 500);
+    await captureApiException(error, { route: "projects/export", method: "GET", status: 500 });
+    return NextResponse.json({ error: "Unable to load export jobs" }, { status: 500 });
+  }
+}
 
 interface RequestBody {
   format?: ExportFormat;

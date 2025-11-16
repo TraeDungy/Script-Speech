@@ -4,7 +4,10 @@ import type { ChangeEvent, ReactNode, UIEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ExportQueuePanel } from "@/components/ExportQueuePanel";
-import { fetchStudioProjectData } from "./actions";
+import type { ScriptDoc } from "@/lib/scriptDoc";
+import type { StudioSessionRecord, StudioSlotPayload } from "@/lib/db/studioSessions";
+import { initializeStudioSession } from "./actions";
+import { StudioOnboardingPanel } from "./onboarding-panel";
 
 import {
   ScriptDocFormatRecommendation,
@@ -879,20 +882,61 @@ const prompts = [
   "Preview export package"
 ];
 
-const DEFAULT_PROJECT_ID = "demo-project";
-
 export default function StudioPage() {
   const metadata = useScriptDocStore((state) => state.doc.metadata);
   const loadDoc = useScriptDocStore((state) => state.loadDoc);
+  const updateMetadata = useScriptDocStore((state) => state.updateMetadata);
+  const [session, setSession] = useState<StudioSessionRecord | null>(null);
+
+  const applySlotMetadata = useCallback(
+    (slots?: StudioSlotPayload | null) => {
+      if (!slots) {
+        return;
+      }
+
+      const updates: Partial<ScriptDoc["metadata"]> = {};
+      if (typeof slots.format === "string" && slots.format.trim()) {
+        updates.format = slots.format;
+      }
+
+      if (Array.isArray(slots.toneKeywords) && slots.toneKeywords.length) {
+        updates.toneKeywords = slots.toneKeywords;
+      }
+
+      if (typeof slots.constraints === "string" && slots.constraints.trim()) {
+        updates.notes = slots.constraints.trim();
+      }
+
+      if (Object.keys(updates).length) {
+        updateMetadata(updates);
+      }
+    },
+    [updateMetadata],
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     async function hydrate() {
       try {
-        const data = await fetchStudioProjectData(DEFAULT_PROJECT_ID);
-        if (!cancelled && data?.scriptDoc) {
+        const data = await initializeStudioSession();
+        if (cancelled) {
+          return;
+        }
+
+        if (data?.scriptDoc) {
           loadDoc(data.scriptDoc);
+        } else if (data?.project) {
+          updateMetadata({
+            projectId: data.project.id,
+            title: data.project.title,
+            format: data.project.scriptType,
+          });
+        }
+
+        setSession(data.session);
+        if (data.session.status === "confirmed") {
+          applySlotMetadata((data.session.summary ?? data.session.slots ?? {}) as StudioSlotPayload);
         }
       } catch (error) {
         console.error("Failed to hydrate studio project", error);
@@ -904,7 +948,7 @@ export default function StudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [loadDoc]);
+  }, [applySlotMetadata, loadDoc, updateMetadata]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-16 px-6 py-16 md:px-10">
@@ -918,6 +962,15 @@ export default function StudioPage() {
           Return to the landing page ↗
         </Link>
       </header>
+
+      <StudioOnboardingPanel
+        session={session}
+        onSessionUpdated={setSession}
+        onSessionConfirmed={(next) => {
+          setSession(next);
+          applySlotMetadata((next.summary ?? next.slots ?? {}) as StudioSlotPayload);
+        }}
+      />
 
       <section className="grid gap-10 md:grid-cols-[1.1fr_1.4fr]">
         <OutlineEditor />
