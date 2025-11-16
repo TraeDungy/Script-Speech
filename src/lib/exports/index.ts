@@ -373,3 +373,7 @@ export async function getExportJob(jobId: string): Promise<ExportJob | null> {
   return queue.getJob(jobId);
 }
 
+export function formatSseEvent(event: string, data: string): string {
+  return `event: ${event}\ndata: ${data}\n\n`;
+}
+
