@@ -13,6 +13,7 @@ import { fetchLatestScriptDoc } from "./scriptDocs";
 import type { ScriptDocRecordType } from "./scriptDocs";
 import type { ProjectMemberRow, ProjectRow } from "./schema";
 import type { ScriptDoc } from "@/lib/scriptDoc";
+import { recordFlowMetric, withSpan } from "@/lib/observability";
 
 export interface ProjectSummary {
   id: string;
@@ -273,51 +274,85 @@ export async function getStudioHydration(
 export async function createProject(
   input: CreateProjectInput,
 ): Promise<ProjectSummary> {
-  if (!isSupabaseConfigured()) {
-    const now = new Date().toISOString();
-    const summary: ProjectSummary = {
-      id: `local-${randomUUID()}`,
-      title: input.title,
-      scriptType: input.scriptType,
-      genre: input.genre ?? null,
-      logline: input.logline ?? null,
-      status: input.status ?? "draft",
-      createdAt: now,
-      updatedAt: now,
-      ownerId: input.ownerId,
-      targetLength: input.targetLength,
-      tags: input.tags ?? [],
-    };
-    localProjects.push(summary);
-    upsertMockProjectMembership(summary.id, input.ownerId, "owner");
-    return summary;
-  }
+  const usesSupabase = isSupabaseConfigured();
+  const storage = usesSupabase ? "supabase" : "local";
 
-  const supabase = getSupabaseClient();
-  const payload = {
-    title: input.title,
-    script_type: input.scriptType,
-    genre: input.genre ?? null,
-    logline: input.logline ?? null,
-    status: input.status ?? "draft",
-    target_length_unit: input.targetLength?.unit ?? null,
-    target_length_value: input.targetLength?.value ?? null,
-    tags: input.tags ?? [],
-    owner_id: input.ownerId,
-  };
+  return withSpan(
+    {
+      name: "onboarding.create-project",
+      attributes: {
+        storage,
+        scriptType: input.scriptType,
+      },
+    },
+    async (span) => {
+      try {
+        if (!usesSupabase) {
+          const now = new Date().toISOString();
+          const summary: ProjectSummary = {
+            id: `local-${randomUUID()}`,
+            title: input.title,
+            scriptType: input.scriptType,
+            genre: input.genre ?? null,
+            logline: input.logline ?? null,
+            status: input.status ?? "draft",
+            createdAt: now,
+            updatedAt: now,
+            ownerId: input.ownerId,
+            targetLength: input.targetLength,
+            tags: input.tags ?? [],
+          };
+          localProjects.push(summary);
+          upsertMockProjectMembership(summary.id, input.ownerId, "owner");
+          recordFlowMetric("onboarding_events_total", "Count of onboarding events", {
+            event: "project.create",
+            result: "created",
+            storage,
+          });
+          return summary;
+        }
 
-  const { data, error } = await supabase
-    .from<ProjectRow>("projects")
-    .insert(payload)
-    .select("*")
-    .single();
+        const supabase = getSupabaseClient();
+        const payload = {
+          title: input.title,
+          script_type: input.scriptType,
+          genre: input.genre ?? null,
+          logline: input.logline ?? null,
+          status: input.status ?? "draft",
+          target_length_unit: input.targetLength?.unit ?? null,
+          target_length_value: input.targetLength?.value ?? null,
+          tags: input.tags ?? [],
+          owner_id: input.ownerId,
+        };
 
-  if (error) {
-    console.error("Failed to create project", error);
-    throw error;
-  }
+        const { data, error } = await supabase
+          .from<ProjectRow>("projects")
+          .insert(payload)
+          .select("*")
+          .single();
 
-  return mapProjectRow(data);
+        if (error) {
+          throw error;
+        }
+
+        recordFlowMetric("onboarding_events_total", "Count of onboarding events", {
+          event: "project.create",
+          result: "created",
+          storage,
+        });
+        span.setAttribute("project.id", data.id);
+        return mapProjectRow(data);
+      } catch (error) {
+        recordFlowMetric("onboarding_events_total", "Count of onboarding events", {
+          event: "project.create",
+          result: "error",
+          storage,
+        });
+        console.error("Failed to create project", error);
+        throw error;
+      }
+    },
+  );
 }
 
 export async function updateProject(

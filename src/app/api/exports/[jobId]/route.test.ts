@@ -15,6 +15,7 @@ const observabilityModule = vi.hoisted(() => ({
   recordApiRequest: vi.fn(),
   recordApiError: vi.fn(),
   captureApiException: vi.fn(),
+  logStructuredEvent: vi.fn(),
   withSpan: async (_options: unknown, fn: (span: { setAttribute: () => void }) => Promise<unknown>) =>
     fn({ setAttribute: () => {} }),
 }));
@@ -46,6 +47,7 @@ describe("/api/exports/[jobId]", () => {
     const response = await GET(request, { params: { jobId: "job-1" } });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ id: "job-1", status: "queued" });
+    expect(mockRecordApiRequest).toHaveBeenCalledWith("exports/job", "GET");
   });
 
   it("returns 404 for unknown job", async () => {
@@ -53,6 +55,7 @@ describe("/api/exports/[jobId]", () => {
     const request = new Request("http://localhost/api/exports/job-unknown");
     const response = await GET(request, { params: { jobId: "job-unknown" } });
     expect(response.status).toBe(404);
+    expect(mockRecordApiError).toHaveBeenCalledWith("exports/job", "GET", 404);
   });
 
   it("streams job updates over SSE", async () => {
