@@ -26,4 +26,4 @@ export declare function listExportJobRecordsForProject(
   projectId: string,
   options?: { limit?: number; includeDownload?: boolean },
 ): Promise<ExportJob[]>;
-export declare function listQueuedExportJobRows(limit: number): Promise<ExportJobRow[]>;
+export declare function claimQueuedExportJobRows(limit: number): Promise<ExportJobRow[]>;

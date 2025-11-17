@@ -269,25 +269,29 @@ export async function listExportJobRecordsForProject(
   return Promise.all((data ?? []).map((row) => mapExportJobRow(row, { includeDownload })));
 }
 
-export async function listQueuedExportJobRows(limit: number): Promise<ExportJobRow[]> {
+export async function claimQueuedExportJobRows(limit: number): Promise<ExportJobRow[]> {
   if (!isSupabaseConfigured()) {
-    return listMockExportJobs()
+    const claimed = listMockExportJobs()
       .filter((job) => job.status === "queued")
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       .slice(0, limit)
-      .map((row) => ({ ...row }));
+      .map((row) => ({ ...row, status: "processing", updated_at: new Date().toISOString() }));
+
+    claimed.forEach((row) => upsertMockExportJob(row));
+    return claimed;
   }
 
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from<ExportJobRow>("export_jobs")
-    .select("*")
+    .update({ status: "processing", updated_at: new Date().toISOString() })
     .eq("status", "queued")
     .order("created_at", { ascending: true })
-    .limit(limit);
+    .limit(limit)
+    .select("*");
 
   if (error) {
-    console.error("Failed to load queued export jobs", error);
+    console.error("Failed to claim queued export jobs", error);
     throw error;
   }
 

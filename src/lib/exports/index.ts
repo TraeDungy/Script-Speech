@@ -7,7 +7,7 @@ import {
   createExportJobRecord,
   fetchExportJobRecord,
   listExportJobRecordsForProject,
-  listQueuedExportJobRows,
+  claimQueuedExportJobRows,
   updateExportJobRecord,
 } from "@/lib/db/exportJobs";
 import type { ExportJob, ExportQueuePayload } from "@/lib/exports/types";
@@ -75,13 +75,12 @@ export function listProjectExportJobs(
 }
 
 export async function processPendingExportJobs(limit = 5): Promise<{ processed: number; failures: number }> {
-  const queued = await listQueuedExportJobRows(limit);
+  const queued = await claimQueuedExportJobRows(limit);
   let processed = 0;
   let failures = 0;
 
   for (const job of queued) {
     try {
-      await updateExportJobRecord(job.id, { status: "processing" });
       const artifact = await renderExport(job);
       const persisted = await persistArtifact(job, artifact);
       await updateExportJobRecord(job.id, { status: "completed", result: persisted, error: null });
