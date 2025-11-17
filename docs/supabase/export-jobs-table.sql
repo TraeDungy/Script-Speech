@@ -34,3 +34,25 @@ for each row execute function public.update_export_jobs_updated_at();
 comment on table public.export_jobs is 'Stores queued export jobs for Fountain, FDX, DOCX and PDF renders.';
 comment on column public.export_jobs.script_doc is 'ScriptDoc payload captured at the time the export was requested.';
 comment on column public.export_jobs.result is 'JSON metadata describing the rendered asset and its storage location.';
+
+-- Claim queued jobs in a single atomic update so concurrent workers don't double-process them.
+create or replace function public.claim_export_jobs(claim_limit integer default 5)
+returns setof public.export_jobs
+language sql
+as $$
+  with candidates as (
+    select id
+    from public.export_jobs
+    where status = 'queued'
+    order by created_at asc
+    limit claim_limit
+    for update skip locked
+  ),
+  updated as (
+    update public.export_jobs
+    set status = 'processing'
+    where id in (select id from candidates)
+    returning public.export_jobs.*
+  )
+  select * from updated;
+$$;

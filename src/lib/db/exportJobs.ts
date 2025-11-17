@@ -282,13 +282,7 @@ export async function claimQueuedExportJobRows(limit: number): Promise<ExportJob
   }
 
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from<ExportJobRow>("export_jobs")
-    .update({ status: "processing", updated_at: new Date().toISOString() })
-    .eq("status", "queued")
-    .order("created_at", { ascending: true })
-    .limit(limit)
-    .select("*");
+  const { data, error } = await supabase.rpc<ExportJobRow[]>("claim_export_jobs", { claim_limit: limit });
 
   if (error) {
     console.error("Failed to claim queued export jobs", error);
