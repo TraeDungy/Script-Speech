@@ -3,9 +3,11 @@ export type ExportFormat = "fountain" | "fdx" | "docx" | "pdf";
 export type ExportJobStatus = "queued" | "processing" | "completed" | "failed";
 
 export interface ExportJobResult {
-  downloadUrl: string;
   fileName: string;
   notes?: string;
+  downloadUrl?: string;
+  contentType?: string;
+  expiresAt?: string;
 }
 
 export interface ExportJob {
@@ -19,6 +21,13 @@ export interface ExportJob {
   result?: ExportJobResult;
   error?: string;
 }
+
+export type ExportQueuePayload = {
+  projectId: string;
+  format: ExportFormat;
+  scriptDoc: ScriptDoc;
+  deliverToEmail?: string;
+};
 
 export interface ScriptDocDialogue {
   character: string;

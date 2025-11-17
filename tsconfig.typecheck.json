@@ -25,7 +25,7 @@
     "src/app/api/request-access/**/*",
     "src/app/api/assets/**/*",
     "src/app/api/exports/**/*",
-    "src/app/api/projects/[id]/export/**/*",
+    "src/app/api/projects/[id]/exports/**/*",
     "src/lib/observability.ts",
     "src/lib/exports/index.ts",
     "src/lib/exports/types.ts",

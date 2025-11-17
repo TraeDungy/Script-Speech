@@ -1,5 +1,4 @@
-import type { ExportQueuePayload } from "@/lib/exports";
-import type { ExportJob } from "@/lib/exports/types";
+import type { ExportJob, ExportQueuePayload } from "@/lib/exports/types";
 
 export interface ExportJobRow {
   id: string;
@@ -19,4 +18,12 @@ export declare function updateExportJobRecord(
   jobId: string,
   updates: Partial<{ status: string; result: unknown; error: string | null }>,
 ): Promise<void>;
-export declare function fetchExportJobRecord(jobId: string): Promise<ExportJob | null>;
+export declare function fetchExportJobRecord(
+  jobId: string,
+  options?: { includeDownload?: boolean },
+): Promise<ExportJob | null>;
+export declare function listExportJobRecordsForProject(
+  projectId: string,
+  options?: { limit?: number; includeDownload?: boolean },
+): Promise<ExportJob[]>;
+export declare function listQueuedExportJobRows(limit: number): Promise<ExportJobRow[]>;

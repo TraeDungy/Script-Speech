@@ -89,6 +89,30 @@ export function ExportQueuePanel() {
   }, [jobs]);
 
   useEffect(() => {
+    const loadInitialJobs = async () => {
+      try {
+        const response = await fetch(`/api/projects/demo-project/exports?limit=10`);
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as { jobs?: ExportJob[] };
+        if (data.jobs?.length) {
+          setJobs((previous) => {
+            const next = { ...previous };
+            for (const job of data.jobs ?? []) {
+              next[job.id] = job;
+            }
+            return next;
+          });
+          jobIdsRef.current = Array.from(new Set([...(data.jobs ?? []).map((job) => job.id), ...jobIdsRef.current]));
+        }
+      } catch (error) {
+        console.error("Failed to load export jobs", error);
+      }
+    };
+
+    void loadInitialJobs();
+
     const interval = setInterval(async () => {
       if (!jobIdsRef.current.length) {
         return;
@@ -99,7 +123,7 @@ export function ExportQueuePanel() {
       await Promise.all(
         jobIdsRef.current.map(async (jobId) => {
           try {
-            const response = await fetch(`/api/exports/${jobId}`);
+            const response = await fetch(`/api/projects/demo-project/exports/${jobId}`);
             if (!response.ok) {
               return;
             }
@@ -131,7 +155,7 @@ export function ExportQueuePanel() {
     setError(null);
 
     try {
-      const response = await fetch(`/api/projects/demo-project/export`, {
+      const response = await fetch(`/api/projects/demo-project/exports`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

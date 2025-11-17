@@ -124,8 +124,14 @@ export interface ExportJobRow {
   deliver_to_email: string | null;
   script_doc: ScriptDoc;
   result: {
-    downloadUrl: string;
-    fileName: string;
+    file_name: string;
+    content_type?: string;
+    storage_driver?: "supabase" | "s3" | "local";
+    storage_bucket?: string;
+    storage_path?: string;
+    storage_key?: string;
+    data_url?: string;
+    size?: number;
     notes?: string;
   } | null;
   error: string | null;

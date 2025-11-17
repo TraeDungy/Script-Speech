@@ -1,13 +1,13 @@
-import type { ExportJob, ExportFormat, ScriptDoc } from "@/lib/exports/types";
-
-export type ExportQueuePayload = {
-  projectId: string;
-  format: ExportFormat;
-  scriptDoc: ScriptDoc;
-  deliverToEmail?: string;
-};
+import type { ExportJob, ExportQueuePayload } from "@/lib/exports/types";
 
 export declare function enqueueExportJob(payload: ExportQueuePayload): Promise<ExportJob>;
-export declare function getExportQueue(): { enqueue(payload: ExportQueuePayload): Promise<ExportJob>; getJob(id: string): Promise<ExportJob | null> };
-export declare function getExportJob(jobId: string): Promise<ExportJob | null>;
+export declare function getExportJob(
+  jobId: string,
+  options?: { includeDownload?: boolean },
+): Promise<ExportJob | null>;
+export declare function listProjectExportJobs(
+  projectId: string,
+  options?: { limit?: number; includeDownload?: boolean },
+): Promise<ExportJob[]>;
+export declare function processPendingExportJobs(limit?: number): Promise<{ processed: number; failures: number }>;
 export declare function formatSseEvent(event: string, data: string): string;
