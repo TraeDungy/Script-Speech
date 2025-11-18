@@ -431,9 +431,16 @@ export function VoiceChatPanel() {
   }, [messages]);
 
   useEffect(() => {
-    if (!projectId || messages.length) {
+    if (!projectId) {
+      setMessages([]);
+      loadTranscriptLog([]);
+      persistedMessagesRef.current.clear();
       return;
     }
+
+    setMessages([]);
+    loadTranscriptLog([]);
+    persistedMessagesRef.current.clear();
 
     let cancelled = false;
 
@@ -463,7 +470,7 @@ export function VoiceChatPanel() {
     return () => {
       cancelled = true;
     };
-  }, [loadTranscriptLog, messages.length, projectId]);
+  }, [loadTranscriptLog, projectId]);
 
   useEffect(() => {
     const metadata = sessionMetadataRef.current;
