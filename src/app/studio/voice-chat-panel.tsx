@@ -112,6 +112,17 @@ function messageToStoreEntry(message: TranscriptMessage): ScriptDocTranscriptEnt
   };
 }
 
+function transcriptEntryToMessage(entry: ScriptDocTranscriptEntry): TranscriptMessage {
+  return {
+    id: entry.id,
+    role: formatRole(entry.role),
+    canonicalRole: entry.role,
+    text: entry.text,
+    final: entry.final,
+    updatedAt: new Date(entry.createdAt).getTime(),
+  };
+}
+
 export function VoiceChatPanel() {
   const projectId = useScriptDocStore((state) => state.doc.metadata.projectId);
   const appendTranscriptTurn = useScriptDocStore((state) => state.appendTranscriptTurn);
@@ -418,6 +429,41 @@ export function VoiceChatPanel() {
   const sortedMessages = useMemo(() => {
     return [...messages].sort((a, b) => a.updatedAt - b.updatedAt);
   }, [messages]);
+
+  useEffect(() => {
+    if (!projectId || messages.length) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadPersistedNotes() {
+      try {
+        const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/notes`, {
+          credentials: "include",
+        });
+        if (!response.ok) {
+          return;
+        }
+        const payload = await response.json().catch(() => ({}));
+        const entries = Array.isArray(payload?.entries) ? (payload.entries as ScriptDocTranscriptEntry[]) : [];
+        if (!entries.length || cancelled) {
+          return;
+        }
+        setMessages(entries.map(transcriptEntryToMessage));
+        loadTranscriptLog(entries);
+        entries.forEach((entry) => persistedMessagesRef.current.add(entry.id));
+      } catch (err) {
+        console.warn("Failed to load stored transcripts", err);
+      }
+    }
+
+    loadPersistedNotes();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [loadTranscriptLog, messages.length, projectId]);
 
   useEffect(() => {
     const metadata = sessionMetadataRef.current;

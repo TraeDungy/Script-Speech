@@ -40,6 +40,19 @@ export interface ScriptDocRow {
   updated_at: string;
 }
 
+export interface ProjectTranscriptTurnRow {
+  id: string;
+  project_id: string;
+  session_id: string | null;
+  user_id: string | null;
+  role: string;
+  text: string;
+  final: boolean;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface BeatRow {
   id: string;
   project_id: string;

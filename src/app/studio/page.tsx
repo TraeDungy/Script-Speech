@@ -3,8 +3,8 @@
 import type { ChangeEvent, ReactNode, UIEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ExportQueuePanel } from "@/components/ExportQueuePanel";
-import { fetchStudioProjectData } from "./actions";
 
 import {
   ScriptDocFormatRecommendation,
@@ -884,18 +884,39 @@ const DEFAULT_PROJECT_ID = "demo-project";
 export default function StudioPage() {
   const metadata = useScriptDocStore((state) => state.doc.metadata);
   const loadDoc = useScriptDocStore((state) => state.loadDoc);
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("projectId") ?? DEFAULT_PROJECT_ID;
+  const [hydrationError, setHydrationError] = useState<string | null>(null);
+  const [isHydrating, setIsHydrating] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function hydrate() {
+      setHydrationError(null);
+      setIsHydrating(true);
       try {
-        const data = await fetchStudioProjectData(DEFAULT_PROJECT_ID);
+        const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`);
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          if (!cancelled) {
+            setHydrationError(payload?.error ?? "Unable to load project");
+          }
+          return;
+        }
+        const data = await response.json();
         if (!cancelled && data?.scriptDoc) {
           loadDoc(data.scriptDoc);
         }
       } catch (error) {
         console.error("Failed to hydrate studio project", error);
+        if (!cancelled) {
+          setHydrationError("Unable to load project data");
+        }
+      } finally {
+        if (!cancelled) {
+          setIsHydrating(false);
+        }
       }
     }
 
@@ -904,7 +925,7 @@ export default function StudioPage() {
     return () => {
       cancelled = true;
     };
-  }, [loadDoc]);
+  }, [loadDoc, projectId]);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-16 px-6 py-16 md:px-10">
@@ -914,6 +935,13 @@ export default function StudioPage() {
         <p className="max-w-3xl text-base text-zinc-400 md:text-lg">
           Live-edit the <span className="font-semibold text-white">{metadata.title}</span> blueprint. Every beat, scene, and annotation syncs through the ScriptDoc store for rapid iteration.
         </p>
+        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+          <span className="rounded-full border border-white/10 px-3 py-1 text-[0.7rem] uppercase tracking-[0.3em] text-zinc-400">
+            Project ID: {projectId}
+          </span>
+          {isHydrating && <span className="text-zinc-500">Syncing latest data…</span>}
+          {hydrationError && <span className="text-rose-300">{hydrationError}</span>}
+        </div>
         <Link href="/" className="text-sm text-zinc-300 hover:text-white">
           Return to the landing page ↗
         </Link>
