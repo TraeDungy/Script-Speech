@@ -1,6 +1,11 @@
 export type ExportFormat = "fountain" | "fdx" | "docx" | "pdf";
 
-export type ExportJobStatus = "queued" | "processing" | "completed" | "failed";
+export type ExportJobStatus =
+  | "queued"
+  | "processing"
+  | "succeeded"
+  | "failed"
+  | "completed";
 
 export interface ExportJobResult {
   fileName: string;
@@ -16,7 +21,9 @@ export interface ExportJobResult {
 
 export interface ExportJob {
   id: string;
-  projectId: string;
+  projectId?: string;
+  userId?: string;
+  scriptDocId?: string | null;
   draftVersionId?: string;
   format: ExportFormat;
   status: ExportJobStatus;
@@ -25,6 +32,8 @@ export interface ExportJob {
   deliverToEmail?: string;
   result?: ExportJobResult;
   error?: string;
+  errorMessage?: string | null;
+  downloadPath?: string | null;
 }
 
 export interface ScriptDocDialogue {

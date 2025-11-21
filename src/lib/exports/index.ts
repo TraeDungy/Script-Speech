@@ -90,7 +90,7 @@ class LocalExportQueue {
       const readyAt = new Date().toISOString();
 
       await updateExportJobRecord(jobId, {
-        status: "completed",
+        status: "succeeded",
         result: {
           fileName,
           notes: rendered.notes,
@@ -414,7 +414,7 @@ class LocalExportQueue {
       const rendered = await renderExport(payload);
       const fileName = buildFileName(payload.projectId, rendered.extension);
       await updateExportJobRecord(jobId, {
-        status: "completed",
+        status: "succeeded",
         result: {
           fileName,
           downloadUrl: createDataUrl(rendered.buffer, rendered.mime),
