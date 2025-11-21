@@ -31,7 +31,7 @@ const observabilityModule = vi.hoisted(() => ({
 }));
 
 const dbModule = vi.hoisted(() => ({
-  listExportJobRecords: vi.fn(),
+  listExportJobsForProject: vi.fn(),
 }));
 
 vi.mock("@/lib/exports", () => exportsModule);
@@ -50,25 +50,25 @@ const ProjectAuthorizationError = authzModule.ProjectAuthorizationError;
 const mockEnforceRateLimit = rateLimitModule.enforceRateLimit;
 const mockLogAuditEvent = auditModule.logAuditEvent;
 const mockCaptureException = observabilityModule.captureApiException;
-const mockListExportJobRecords = dbModule.listExportJobRecords;
+const mockListExportJobsForProject = dbModule.listExportJobsForProject;
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockRequireServerAuthSession.mockResolvedValue({ user: { id: "user-1" } });
   mockEnforceRateLimit.mockResolvedValue({ allowed: true, resetAt: Date.now() + 1000 });
-  mockListExportJobRecords.mockResolvedValue([]);
+  mockListExportJobsForProject.mockResolvedValue([]);
 });
 
 describe("/api/projects/[id]/export", () => {
   it("lists export jobs for the project", async () => {
     const jobs = [{ id: "job-1" }];
-    mockListExportJobRecords.mockResolvedValueOnce(jobs);
+    mockListExportJobsForProject.mockResolvedValueOnce(jobs);
     const request = new NextRequest("http://localhost/api/projects/demo/export?limit=5");
 
     const response = await GET(request, { params: { id: "demo" } });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ jobs });
-    expect(mockListExportJobRecords).toHaveBeenCalledWith("demo", { limit: 5 });
+    expect(mockListExportJobsForProject).toHaveBeenCalledWith("demo", { limit: 5 });
   });
 
   it("enforces authentication on GET", async () => {

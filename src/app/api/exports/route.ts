@@ -1,17 +1,10 @@
-import { Buffer } from "node:buffer";
-
 import { NextResponse } from "next/server";
 
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
-import {
-  createQueuedExportJob,
-  getExportJobForUser,
-  listExportJobsForUser,
-  updateExportJobForUser,
-} from "@/lib/exports/jobs";
-import type { ExportJob } from "@/lib/exports/types";
+import { enqueueExportJob, getExportJob } from "@/lib/exports";
+import type { ExportJob, ScriptDoc as ExportScriptDoc } from "@/lib/exports/types";
+import { listExportJobsForUser } from "@/lib/db/exportJobs";
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
-import { SUPABASE_STORAGE_BUCKET } from "@/lib/storage/config";
 import { ensureProjectMembership, ProjectAuthorizationError } from "@/lib/authz/projects.server";
 import { recordBusinessEvent, withSpan } from "@/lib/observability";
 import {
@@ -67,6 +60,11 @@ export async function POST(request: Request) {
         attributes: { route: "/api/exports", requestId, userId: user.id },
       },
       async (span) => {
+        const supabase = getSupabaseServiceClient();
+        if (!supabase) {
+          return NextResponse.json({ error: "Supabase client unavailable" }, { status: 503 });
+        }
+
         const fetchedDoc = body.scriptDocId ? await fetchScriptDoc(body.scriptDocId, user.id) : null;
         const scriptDocPayload = body.content ?? fetchedDoc?.doc ?? null;
 
@@ -75,20 +73,14 @@ export async function POST(request: Request) {
           await ensureProjectMembership(projectId, user.id, { minimumRole: "viewer" });
         }
 
-        const supabase = getSupabaseServiceClient();
-        if (!supabase) {
-          return NextResponse.json({ error: "Supabase client unavailable" }, { status: 503 });
-        }
-
         if (!scriptDocPayload) {
           return NextResponse.json({ error: "ScriptDoc not found" }, { status: 404 });
         }
 
-        const job = await createQueuedExportJob({
+        const job = await enqueueExportJob({
           userId: user.id,
-          projectId,
-          scriptDocId: body.scriptDocId ?? null,
-          scriptDoc: scriptDocPayload,
+          projectId: projectId ?? user.id,
+          scriptDoc: scriptDocPayload as ExportScriptDoc,
           format: body.format ?? "pdf",
           deliverToEmail: body.deliverToEmail,
         });
@@ -99,10 +91,6 @@ export async function POST(request: Request) {
         recordBusinessEvent("export_jobs_enqueued_total", "Queued export jobs", {
           format: job.format,
           hasProject: Boolean(projectId),
-        });
-
-        void processJobArtifact(job, scriptDocPayload, { requestId }).catch((error) => {
-          log({ level: "error", message: "export.job.process.failed", error });
         });
 
         return NextResponse.json(job, {
@@ -159,63 +147,6 @@ async function fetchScriptDoc(
   return { doc: data.doc, projectId: data.project_id ?? null };
 }
 
-async function processJobArtifact(
-  job: ExportJob,
-  content: unknown,
-  context?: { requestId?: string },
-): Promise<void> {
-  const supabase = getSupabaseServiceClient();
-  if (!supabase) {
-    return;
-  }
-
-  if (!SUPABASE_STORAGE_BUCKET) {
-    await updateExportJobForUser(job.id, job.userId ?? "", {
-      status: "failed",
-      error_message: "Storage bucket unavailable",
-    });
-    return;
-  }
-
-  await updateExportJobForUser(job.id, job.userId ?? "", { status: "processing" });
-
-  try {
-    const payloadBuffer = Buffer.from(JSON.stringify(content ?? {}, null, 2));
-    const downloadPath = job.downloadPath ?? `exports/${job.userId ?? "anonymous"}/${job.id}.json`;
-
-    const { error: uploadError } = await supabase.storage
-      .from(SUPABASE_STORAGE_BUCKET)
-      .upload(downloadPath, payloadBuffer, {
-        contentType: "application/json",
-        upsert: true,
-      });
-
-    if (uploadError) {
-      throw uploadError;
-    }
-
-    await updateExportJobForUser(job.id, job.userId ?? "", {
-      status: "completed",
-      download_path: downloadPath,
-      error_message: null,
-    });
-    recordBusinessEvent("export_jobs_completed_total", "Completed export jobs", {
-      format: job.format,
-      storage: SUPABASE_STORAGE_BUCKET,
-    });
-  } catch (error) {
-    recordBusinessEvent("export_jobs_failed_total", "Failed export jobs", {
-      format: job.format,
-    });
-    await updateExportJobForUser(job.id, job.userId ?? "", {
-      status: "failed",
-      error_message: error instanceof Error ? error.message : "Failed to render export",
-    });
-    const log = createRequestLogger(context?.requestId);
-    log({ level: "error", message: "export.job.storage.failed", error, context: { jobId: job.id } });
-  }
-}
-
 export async function GET(request: Request) {
   const requestId = getRequestIdFromHeaders(request.headers);
   const log = createRequestLogger(requestId);
@@ -223,18 +154,16 @@ export async function GET(request: Request) {
 
   try {
     const { user } = await requireServerAuthSession();
-    if (!jobId) {
-      const jobs = await listExportJobsForUser(user.id);
-      return NextResponse.json(jobs, { headers: { "Cache-Control": "no-cache, no-store" } });
+    if (jobId) {
+      const job = await getExportJob(jobId);
+      if (!job || (job.userId && job.userId !== user.id)) {
+        return NextResponse.json({ error: "Export job not found" }, { status: 404 });
+      }
+      return NextResponse.json(job, { headers: { "Cache-Control": "no-cache, no-store" } });
     }
 
-    const job = await getExportJobForUser(jobId, user.id);
-
-    if (!job) {
-      return NextResponse.json({ error: "Export job not found" }, { status: 404 });
-    }
-
-    return NextResponse.json(job, { headers: { "Cache-Control": "no-cache, no-store" } });
+    const jobs = await listExportJobsForUser(user.id);
+    return NextResponse.json(jobs, { headers: { "Cache-Control": "no-cache, no-store" } });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
