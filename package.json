@@ -11,6 +11,7 @@
     "test:unit": "vitest run",
     "test:e2e": "node ./scripts/run-e2e-tests.mjs",
     "type-check": "tsc --project tsconfig.typecheck.json",
+    "typecheck": "npm run type-check",
     "check": "npm run lint && npm run type-check && npm run test:unit"
   },
   "dependencies": {
