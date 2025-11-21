@@ -10,6 +10,7 @@ type WizardState = {
   tones: string;
   goals: string;
   voiceTranscript: string;
+  voiceTranscriptRef: string | null;
 };
 
 type HydratedProject = {
@@ -133,16 +134,20 @@ export function OnboardingWizard() {
   const [hydration, setHydration] = useState<HydratedProject | null>(null);
   const [state, setState] = useState<WizardState>(() => {
     if (typeof window === "undefined") {
-      return { title: "", intent: "", tones: "", goals: "", voiceTranscript: "" };
+      return { title: "", intent: "", tones: "", goals: "", voiceTranscript: "", voiceTranscriptRef: null };
     }
     const cached = window.sessionStorage.getItem(storageKey);
     if (!cached) {
-      return { title: "", intent: "", tones: "", goals: "", voiceTranscript: "" };
+      return { title: "", intent: "", tones: "", goals: "", voiceTranscript: "", voiceTranscriptRef: null };
     }
     try {
-      return JSON.parse(cached) as WizardState;
+      const parsed = JSON.parse(cached) as WizardState;
+      return {
+        ...parsed,
+        voiceTranscriptRef: parsed.voiceTranscriptRef ?? null,
+      };
     } catch {
-      return { title: "", intent: "", tones: "", goals: "", voiceTranscript: "" };
+      return { title: "", intent: "", tones: "", goals: "", voiceTranscript: "", voiceTranscriptRef: null };
     }
   });
 
@@ -153,9 +158,15 @@ export function OnboardingWizard() {
     window.sessionStorage.setItem(storageKey, JSON.stringify(state));
   }, [state]);
 
+  useEffect(() => {
+    if (state.voiceTranscript && !state.voiceTranscriptRef) {
+      setState((prev) => ({ ...prev, voiceTranscriptRef: `voice-${Date.now()}` }));
+    }
+  }, [state.voiceTranscript, state.voiceTranscriptRef]);
+
   const scriptDocPayload: ScriptDocPayload = useMemo(() => {
     const tones = parseTones(state.tones);
-    const transcriptRef = state.voiceTranscript ? [`voice-${Date.now()}`] : [];
+    const transcriptRef = state.voiceTranscript && state.voiceTranscriptRef ? [state.voiceTranscriptRef] : [];
     return {
       doc: {
         intent: state.intent,
@@ -233,7 +244,7 @@ export function OnboardingWizard() {
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.intent, state.tones, state.goals, state.voiceTranscript]);
+  }, [hydration?.projectId, state.intent, state.tones, state.goals, state.voiceTranscript]);
 
   const progress = ((Math.min(step, 2) + 1) / 3) * 100;
 

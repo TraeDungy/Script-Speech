@@ -73,6 +73,16 @@ describe("/api/projects", () => {
     await expect(response.json()).resolves.toEqual({ error: "Unable to load projects" });
   });
 
+  it("rejects invalid limit parameter", async () => {
+    const request = new NextRequest("http://localhost/api/projects?limit=abc");
+
+    const response = await GET(request);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid limit parameter" });
+    expect(mockListProjects).not.toHaveBeenCalled();
+    expect(mockRecordApiError).toHaveBeenCalledWith("projects", "GET", 400);
+  });
+
   it("creates a project and script doc for the authenticated user", async () => {
     const result = { project: { id: "p1", title: "Pilot", scriptType: "feature", metadata: {}, updatedAt: "" }, scriptDoc: null };
     mockCreateProjectWithDoc.mockResolvedValueOnce(result);

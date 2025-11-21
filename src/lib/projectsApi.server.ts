@@ -48,7 +48,11 @@ export async function listProjectsForUser(
   options: { limit?: number } = {},
 ): Promise<ProjectSummary[]> {
   const supabase = getDbClient();
-  const limit = Math.min(Math.max(options.limit ?? 25, 1), 100);
+  const limitCandidate = options.limit;
+  const limit = Math.min(
+    Math.max(Number.isFinite(limitCandidate) ? (limitCandidate as number) : 25, 1),
+    100,
+  );
   const { data, error } = await supabase
     .from("projects")
     .select("*")

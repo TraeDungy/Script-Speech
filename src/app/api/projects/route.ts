@@ -21,7 +21,13 @@ export async function GET(request: NextRequest) {
   try {
     return await withSpan({ name: "api.projects.get" }, async () => {
       const { user } = await requireServerAuthSession();
-      const limit = Number(request.nextUrl.searchParams.get("limit")) || undefined;
+      const limitParam = request.nextUrl.searchParams.get("limit");
+      const limit = limitParam === null ? undefined : Number.parseInt(limitParam, 10);
+
+      if (limitParam !== null && (!Number.isFinite(limit) || limit <= 0)) {
+        recordApiError("projects", "GET", 400);
+        return NextResponse.json({ error: "Invalid limit parameter" }, { status: 400 });
+      }
       const projects = await listProjectsForUser(user.id, { limit });
 
       logStructuredEvent({
