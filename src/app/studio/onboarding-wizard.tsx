@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import type { Tables } from "@/types/supabase";
+import type { ScriptDoc } from "@/lib/scriptDoc";
+import type { StudioSessionRecord, StudioSlotPayload } from "@/lib/db/studioSessions";
+import type { StudioInitializationPayload } from "./actions";
+import { persistStudioTranscript, saveStudioSlotInputs } from "./actions";
 
 type WizardState = {
   title: string;
@@ -10,28 +13,12 @@ type WizardState = {
   tones: string;
   goals: string;
   voiceTranscript: string;
-  voiceTranscriptRef: string | null;
 };
 
-type HydratedProject = {
-  projectId: string;
-  projectTitle: string;
-  scriptDoc: Tables<"script_docs"> | null;
+type OnboardingWizardProps = {
+  initialization: StudioInitializationPayload | null;
+  onSessionUpdated?: (session: StudioSessionRecord) => void;
 };
-
-type ScriptDocPayload = {
-  doc: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-  transcriptRefs?: string[];
-  recordType?: Tables<"script_docs">["record_type"];
-};
-
-type ProjectPayload = {
-  project: { id: string; title: string };
-  scriptDoc: Tables<"script_docs"> | null;
-};
-
-const storageKey = "studio-onboarding-wizard";
 
 function parseTones(input: string): string[] {
   return input
@@ -39,37 +26,17 @@ function parseTones(input: string): string[] {
     .map((entry) => entry.trim())
     .filter(Boolean);
 }
-
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    credentials: "include",
-  });
-
-  if (!response.ok) {
-    const details = await response.json().catch(() => ({}));
-    throw new Error(details.error ?? "Request failed");
-  }
-
-  return (await response.json()) as T;
-}
-
-function toHydratedProject(payload: ProjectPayload): HydratedProject {
-  return {
-    projectId: payload.project.id,
-    projectTitle: payload.project.title,
-    scriptDoc: payload.scriptDoc,
-  };
-}
-
-function ScriptDocPreview({ hydration }: { hydration: HydratedProject | null }) {
-  const transcriptRefs = hydration?.scriptDoc?.transcript_refs ?? [];
-  const doc = hydration?.scriptDoc?.doc as Record<string, unknown> | undefined;
-  const wizardMetadata = hydration?.scriptDoc?.metadata as Record<string, unknown> | undefined;
+function ScriptDocPreview({
+  hydration,
+  transcriptRefs,
+  payload,
+}: {
+  hydration: StudioInitializationPayload | null;
+  transcriptRefs: string[];
+  payload: StudioSlotPayload;
+}) {
+  const scriptDoc = hydration?.scriptDoc as ScriptDoc | null;
+  const projectTitle = hydration?.project?.title ?? "Untitled project";
 
   if (!hydration) {
     return null;
@@ -79,32 +46,35 @@ function ScriptDocPreview({ hydration }: { hydration: HydratedProject | null }) 
     <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-inner shadow-black/30 backdrop-blur">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">ScriptDoc hydration</p>
-          <h3 className="text-xl font-semibold text-white">{hydration.projectTitle}</h3>
+          <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Studio hydration</p>
+          <h3 className="text-xl font-semibold text-white">{projectTitle}</h3>
+          <p className="mt-1 text-xs text-zinc-400">
+            Project {hydration.project?.id ?? "pending"} · Session {hydration.session.id} · {hydration.session.status}
+          </p>
         </div>
         <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-200">
-          Synced
+          Supabase linked
         </span>
       </div>
 
       <dl className="mt-4 grid gap-3 text-sm text-zinc-300 md:grid-cols-3">
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-zinc-500">Intent</dt>
-          <dd className="mt-1 text-white">{(doc?.intent as string) ?? "—"}</dd>
+          <dd className="mt-1 text-white">{(payload.intent as string) ?? "—"}</dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-zinc-500">Tones</dt>
-          <dd className="mt-1 text-white">{(doc?.tones as string[])?.join(", ") ?? "—"}</dd>
+          <dd className="mt-1 text-white">{Array.isArray(payload.tones) ? payload.tones.join(", ") : "—"}</dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-[0.3em] text-zinc-500">Goal</dt>
-          <dd className="mt-1 text-white">{(doc?.goal as string) ?? "—"}</dd>
+          <dd className="mt-1 text-white">{(payload.goal as string) ?? "—"}</dd>
         </div>
       </dl>
 
       <div className="mt-4">
         <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Voice transcripts</p>
-        {transcriptRefs?.length ? (
+        {transcriptRefs.length ? (
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-200">
             {transcriptRefs.map((entry) => (
               <li key={entry}>{entry}</li>
@@ -115,11 +85,11 @@ function ScriptDocPreview({ hydration }: { hydration: HydratedProject | null }) 
         )}
       </div>
 
-      {wizardMetadata && (
+      {scriptDoc?.metadata && (
         <div className="mt-4">
           <p className="text-xs uppercase tracking-[0.3em] text-zinc-500">Metadata</p>
           <pre className="mt-2 overflow-x-auto rounded-2xl bg-black/40 p-3 text-xs text-zinc-200">
-            {JSON.stringify(wizardMetadata, null, 2)}
+            {JSON.stringify(scriptDoc.metadata, null, 2)}
           </pre>
         </div>
       )}
@@ -127,104 +97,68 @@ function ScriptDocPreview({ hydration }: { hydration: HydratedProject | null }) 
   );
 }
 
-export function OnboardingWizard() {
+export function OnboardingWizard({ initialization, onSessionUpdated }: OnboardingWizardProps) {
   const [step, setStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hydration, setHydration] = useState<HydratedProject | null>(null);
-  const [state, setState] = useState<WizardState>(() => {
-    if (typeof window === "undefined") {
-      return { title: "", intent: "", tones: "", goals: "", voiceTranscript: "", voiceTranscriptRef: null };
-    }
-    const cached = window.sessionStorage.getItem(storageKey);
-    if (!cached) {
-      return { title: "", intent: "", tones: "", goals: "", voiceTranscript: "", voiceTranscriptRef: null };
-    }
-    try {
-      const parsed = JSON.parse(cached) as WizardState;
-      return {
-        ...parsed,
-        voiceTranscriptRef: parsed.voiceTranscriptRef ?? null,
-      };
-    } catch {
-      return { title: "", intent: "", tones: "", goals: "", voiceTranscript: "", voiceTranscriptRef: null };
-    }
+  const [hydration, setHydration] = useState<StudioInitializationPayload | null>(initialization);
+  const [transcriptRefs, setTranscriptRefs] = useState<string[]>([]);
+  const [state, setState] = useState<WizardState>({
+    title: initialization?.project?.title ?? "",
+    intent: "",
+    tones: "",
+    goals: "",
+    voiceTranscript: "",
   });
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
+    setHydration(initialization);
+    if (initialization?.project?.title) {
+      setState((prev) => ({ ...prev, title: prev.title || initialization.project?.title || "" }));
     }
-    window.sessionStorage.setItem(storageKey, JSON.stringify(state));
-  }, [state]);
+  }, [initialization?.project?.id, initialization?.project?.title]);
 
-  useEffect(() => {
-    if (state.voiceTranscript && !state.voiceTranscriptRef) {
-      setState((prev) => ({ ...prev, voiceTranscriptRef: `voice-${Date.now()}` }));
-    }
-  }, [state.voiceTranscript, state.voiceTranscriptRef]);
-
-  const scriptDocPayload: ScriptDocPayload = useMemo(() => {
+  const slotPayload = useMemo<StudioSlotPayload>(() => {
     const tones = parseTones(state.tones);
-    const transcriptRef = state.voiceTranscript && state.voiceTranscriptRef ? [state.voiceTranscriptRef] : [];
     return {
-      doc: {
-        intent: state.intent,
-        tones,
-        goal: state.goals,
-        transcript: state.voiceTranscript || undefined,
-        capturedAt: new Date().toISOString(),
-      },
-      metadata: {
-        wizard: {
-          intent: state.intent,
-          tones,
-          goals: state.goals,
-          voiceTranscript: state.voiceTranscript,
-        },
-      },
-      transcriptRefs: transcriptRef,
-      recordType: "autosave",
-    };
-  }, [state.goals, state.intent, state.tones, state.voiceTranscript]);
-
-  const persistProject = async (projectId: string, title: string) => {
-    const payload = {
-      metadata: {
-        intent: state.intent,
-        tones: parseTones(state.tones),
-        goals: state.goals,
-      },
-      title,
-      scriptDoc: scriptDocPayload,
-    };
-
-    await fetchJson(`/api/projects/${projectId}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
-    const refreshed = await fetchJson<ProjectPayload>(`/api/projects/${projectId}`);
-    setHydration(toHydratedProject(refreshed));
-  };
+      intent: state.intent,
+      tones,
+      goal: state.goals,
+      title: state.title || initialization?.project?.title,
+    } satisfies StudioSlotPayload;
+  }, [initialization?.project?.title, state.goals, state.intent, state.tones, state.title]);
 
   const handleSubmit = async () => {
+    const sessionId = hydration?.session.id;
+    const projectId = hydration?.session.projectId;
+    if (!sessionId || !projectId) {
+      setError("Studio session could not be initialized.");
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
     try {
-      const result = await fetchJson<ProjectPayload>("/api/projects", {
-        method: "POST",
-        body: JSON.stringify({
-          title: state.title || "Untitled project",
-          scriptType: "feature",
-          metadata: {
-            intent: state.intent,
-            tones: parseTones(state.tones),
-            goals: state.goals,
-          },
-          scriptDoc: scriptDocPayload,
-        }),
+      const updated = await saveStudioSlotInputs({
+        sessionId,
+        projectId,
+        slots: slotPayload,
       });
-      setHydration(toHydratedProject(result));
+      setHydration((prev) => (prev ? { ...prev, session: updated } : prev));
+      onSessionUpdated?.(updated);
+
+      if (state.voiceTranscript.trim()) {
+        const transcriptLabel = `voice-${Date.now()}`;
+        await persistStudioTranscript({
+          sessionId,
+          projectId,
+          transcript: state.voiceTranscript,
+          speaker: "user",
+          source: "wizard",
+        });
+        setTranscriptRefs((previous) => Array.from(new Set([...previous, transcriptLabel])));
+      }
+
       setStep(2);
     } catch (err) {
       setError((err as Error).message);
@@ -232,19 +166,6 @@ export function OnboardingWizard() {
       setIsSubmitting(false);
     }
   };
-
-  useEffect(() => {
-    if (!hydration?.projectId) {
-      return;
-    }
-    const timer = setTimeout(() => {
-      persistProject(hydration.projectId, hydration.projectTitle).catch((err) => {
-        console.error("Failed to persist wizard state", err);
-      });
-    }, 600);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydration?.projectId, state.intent, state.tones, state.goals, state.voiceTranscript]);
 
   const progress = ((Math.min(step, 2) + 1) / 3) * 100;
 
@@ -254,6 +175,9 @@ export function OnboardingWizard() {
         <div>
           <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Onboarding wizard</p>
           <h2 className="text-2xl font-semibold text-white">Capture intent before drafting</h2>
+          <p className="text-xs text-zinc-400">
+            Project and session IDs are provisioned through Supabase RPCs as soon as you land on this route.
+          </p>
         </div>
         <div className="w-40">
           <div className="h-2 overflow-hidden rounded-full bg-white/10">
@@ -324,7 +248,7 @@ export function OnboardingWizard() {
                 placeholder="Festival-ready pilot, tight two-minute pitch, character bible, etc."
               />
               <label className="mt-3 block text-sm font-medium text-zinc-200" htmlFor="wizard-voice">
-                Voice transcript (paste notes from voice capture)
+                Voice transcript (captured to Supabase)
               </label>
               <textarea
                 id="wizard-voice"
@@ -362,7 +286,7 @@ export function OnboardingWizard() {
                 disabled={isSubmitting}
                 onClick={handleSubmit}
               >
-                {isSubmitting ? "Saving..." : "Save project"}
+                {isSubmitting ? "Saving..." : "Save to Supabase"}
               </button>
             )}
           </div>
@@ -373,27 +297,23 @@ export function OnboardingWizard() {
           <pre className="max-h-[420px] overflow-auto rounded-2xl bg-black/60 p-3 text-xs text-emerald-100">
             {JSON.stringify(
               {
-                metadata: {
-                  intent: state.intent,
-                  tones: parseTones(state.tones),
-                  goals: state.goals,
-                },
-                transcriptRefs: scriptDocPayload.transcriptRefs,
-                doc: scriptDocPayload.doc,
+                session: hydration?.session,
+                slots: slotPayload,
+                transcript: state.voiceTranscript ? "ready" : "",
               },
               null,
               2,
             )}
           </pre>
           <p className="text-xs text-zinc-400">
-            We automatically persist this structure to Supabase using the /api/projects endpoints and hydrate the ScriptDoc view
-            below when it finishes saving.
+            Slot values are stored on the active studio session. When provided, transcripts are logged directly through the
+            Supabase RPC used by the voice capture panel.
           </p>
         </div>
       </div>
 
       <div className="mt-6">
-        <ScriptDocPreview hydration={hydration} />
+        <ScriptDocPreview hydration={hydration} transcriptRefs={transcriptRefs} payload={slotPayload} />
       </div>
     </section>
   );

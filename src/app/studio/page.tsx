@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ExportQueuePanel } from "@/components/ExportQueuePanel";
 import type { ScriptDoc } from "@/lib/scriptDoc";
 import type { StudioSessionRecord, StudioSlotPayload } from "@/lib/db/studioSessions";
+import type { StudioInitializationPayload } from "./actions";
 import { initializeStudioSession } from "./actions";
 import { StudioOnboardingPanel } from "./onboarding-panel";
 import { OnboardingWizard } from "./onboarding-wizard";
@@ -887,7 +888,9 @@ export default function StudioPage() {
   const metadata = useScriptDocStore((state) => state.doc.metadata);
   const loadDoc = useScriptDocStore((state) => state.loadDoc);
   const updateMetadata = useScriptDocStore((state) => state.updateMetadata);
+  const [initialization, setInitialization] = useState<StudioInitializationPayload | null>(null);
   const [session, setSession] = useState<StudioSessionRecord | null>(null);
+  const projectId = metadata.projectId ?? "preview-project";
 
   const applySlotMetadata = useCallback(
     (slots?: StudioSlotPayload | null) => {
@@ -924,6 +927,8 @@ export default function StudioPage() {
         if (cancelled) {
           return;
         }
+
+        setInitialization(data);
 
         if (data?.scriptDoc) {
           loadDoc(data.scriptDoc);
@@ -964,7 +969,7 @@ export default function StudioPage() {
         </Link>
       </header>
 
-      <OnboardingWizard />
+      <OnboardingWizard initialization={initialization} onSessionUpdated={setSession} />
 
       <StudioOnboardingPanel
         session={session}
@@ -1030,7 +1035,7 @@ export default function StudioPage() {
               ))}
             </ul>
           </div>
-          <ExportQueuePanel projectId={DEFAULT_PROJECT_ID} />
+          <ExportQueuePanel projectId={projectId} />
         </aside>
       </section>
     </main>
