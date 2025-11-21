@@ -12,6 +12,7 @@ import {
 import type { ExportJob } from "@/lib/exports/types";
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
 import { SUPABASE_STORAGE_BUCKET } from "@/lib/storage/config";
+import { ensureProjectMembership, ProjectAuthorizationError } from "@/lib/authz/projects.server";
 
 interface ExportRequestPayload {
   scriptDocId?: string;
@@ -51,15 +52,19 @@ export async function POST(request: Request) {
   }
 
   const { user } = await requireServerAuthSession();
-  const supabase = getSupabaseServiceClient();
-
-  if (!supabase) {
-    return NextResponse.json({ error: "Supabase client unavailable" }, { status: 503 });
-  }
-
   try {
-    const scriptDocPayload =
-      body.content ?? (body.scriptDocId ? await fetchScriptDoc(body.scriptDocId, user.id) : null);
+    const fetchedDoc = body.scriptDocId ? await fetchScriptDoc(body.scriptDocId, user.id) : null;
+    const scriptDocPayload = body.content ?? fetchedDoc?.doc ?? null;
+
+    const projectId = extractProjectId(scriptDocPayload) ?? fetchedDoc?.projectId ?? null;
+    if (projectId) {
+      await ensureProjectMembership(projectId, user.id, { minimumRole: "viewer" });
+    }
+
+    const supabase = getSupabaseServiceClient();
+    if (!supabase) {
+      return NextResponse.json({ error: "Supabase client unavailable" }, { status: 503 });
+    }
 
     if (!scriptDocPayload) {
       return NextResponse.json({ error: "ScriptDoc not found" }, { status: 404 });
@@ -67,7 +72,7 @@ export async function POST(request: Request) {
 
     const job = await createQueuedExportJob({
       userId: user.id,
-      projectId: extractProjectId(scriptDocPayload),
+      projectId,
       scriptDocId: body.scriptDocId ?? null,
       scriptDoc: scriptDocPayload,
       format: body.format ?? "pdf",
@@ -83,19 +88,25 @@ export async function POST(request: Request) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    if (error instanceof ProjectAuthorizationError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     console.error("Unable to queue export job", error);
     return NextResponse.json({ error: "Unable to queue export job" }, { status: 500 });
   }
 }
 
-async function fetchScriptDoc(scriptDocId: string, userId: string): Promise<unknown | null> {
+async function fetchScriptDoc(
+  scriptDocId: string,
+  userId: string,
+): Promise<{ doc: unknown; projectId: string | null } | null> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) return null;
 
   const { data, error } = await supabase
     .from("script_docs")
-    .select("doc, user_id")
+    .select("doc, user_id, project_id")
     .eq("id", scriptDocId)
     .maybeSingle();
 
@@ -114,7 +125,11 @@ async function fetchScriptDoc(scriptDocId: string, userId: string): Promise<unkn
     throw new UnauthorizedError();
   }
 
-  return data.doc;
+  if (data.project_id) {
+    await ensureProjectMembership(data.project_id, userId, { minimumRole: "viewer" });
+  }
+
+  return { doc: data.doc, projectId: data.project_id ?? null };
 }
 
 async function processJobArtifact(job: ExportJob, content: unknown): Promise<void> {

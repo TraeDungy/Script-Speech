@@ -1,4 +1,5 @@
 import { cookies, headers } from "next/headers";
+import { NextRequest } from "next/server";
 import { redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 
@@ -20,7 +21,7 @@ export class UnauthorizedError extends Error {
   }
 }
 
-function extractBearerToken(headerValue: string | null): string | null {
+export function extractBearerToken(headerValue: string | null): string | null {
   if (!headerValue) {
     return null;
   }
@@ -40,12 +41,17 @@ function readAccessToken(): string | null {
   return headerToken ?? null;
 }
 
-export async function getServerAuthSession(): Promise<ServerAuthSession | null> {
-  const accessToken = readAccessToken();
-  if (!accessToken) {
-    return null;
+export function readAccessTokenFromRequest(request: NextRequest): string | null {
+  const cookieToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value?.trim();
+  if (cookieToken) {
+    return cookieToken;
   }
 
+  const headerToken = extractBearerToken(request.headers.get(AUTHORIZATION_HEADER));
+  return headerToken ?? null;
+}
+
+async function resolveUser(accessToken: string): Promise<User | null> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     return null;
@@ -57,11 +63,38 @@ export async function getServerAuthSession(): Promise<ServerAuthSession | null> 
       return null;
     }
 
-    return { user: data.user, accessToken };
+    return data.user;
   } catch (error) {
-    console.warn("Failed to resolve Supabase session", error);
+    console.warn("Failed to resolve Supabase user", error);
     return null;
   }
+}
+
+export async function getUserFromAccessToken(accessToken: string): Promise<User | null> {
+  return resolveUser(accessToken);
+}
+
+export async function getUserFromRequest(request: NextRequest): Promise<User | null> {
+  const accessToken = readAccessTokenFromRequest(request);
+  if (!accessToken) {
+    return null;
+  }
+
+  return resolveUser(accessToken);
+}
+
+export async function getServerAuthSession(): Promise<ServerAuthSession | null> {
+  const accessToken = readAccessToken();
+  if (!accessToken) {
+    return null;
+  }
+
+  const user = await resolveUser(accessToken);
+  if (!user) {
+    return null;
+  }
+
+  return { user, accessToken };
 }
 
 export async function requireServerAuthSession(options?: {
