@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import type { ExportQueuePayload } from "@/lib/exports";
 import { enqueueExportJob } from "@/lib/exports";
 import type { ExportFormat } from "@/lib/exports/types";
-import { listExportJobRecords } from "@/lib/db/exportJobs";
+import { listExportJobsForProject } from "@/lib/db/exportJobs";
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
 import {
   ensureProjectMembership,
@@ -36,7 +36,7 @@ export async function GET(
     const { user } = await requireServerAuthSession();
     await ensureProjectMembership(projectId, user.id, { minimumRole: "member" });
 
-    const jobs = await listExportJobRecords(projectId, { limit });
+    const jobs = await listExportJobsForProject(projectId, { limit });
     return NextResponse.json({ jobs });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
@@ -108,6 +108,7 @@ export async function POST(
       format: body.format,
       scriptDoc: body.scriptDoc,
       deliverToEmail: body.deliverToEmail?.trim() || undefined,
+      userId: user.id,
     });
 
     await logAuditEvent({

@@ -184,14 +184,14 @@ export async function searchReferenceAssetEmbeddings(
   }
 
   const records = memoryIndex.get(input.projectId) ?? [];
+
   const scored = records
-    .map((record) => ({
-      ...record,
-      similarity: cosineSimilarity(record.embedding, embedding),
-    }))
+    .map((record) => {
+      const { embedding: embeddingVector, ...rest } = record;
+      return { ...rest, similarity: cosineSimilarity(embeddingVector, embedding) };
+    })
     .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
-    .slice(0, matchCount)
-    .map(({ embedding: _embedding, ...rest }) => rest);
+    .slice(0, matchCount);
 
   return scored;
 }

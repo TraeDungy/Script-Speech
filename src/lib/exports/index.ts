@@ -26,6 +26,7 @@ export type ExportQueuePayload = {
   format: ExportFormat;
   scriptDoc: ScriptDoc;
   deliverToEmail?: string;
+  userId?: string;
 };
 
 type RenderedExportResult = {
@@ -54,7 +55,11 @@ class LocalExportQueue {
   private payloads = new Map<string, ExportQueuePayload & { draftVersionId?: string | null }>();
 
   async enqueue(payload: ExportQueuePayload): Promise<ExportJob> {
-    const draft = await createDraftVersionRecord({ projectId: payload.projectId, doc: payload.scriptDoc });
+    const draft = await createDraftVersionRecord({
+      projectId: payload.projectId,
+      doc: payload.scriptDoc,
+      createdBy: payload.userId ?? null,
+    });
     const job = await createExportJobRecord({
       ...payload,
       draftVersionId: draft.id,
@@ -325,7 +330,7 @@ function scriptDocToFdx(doc: ScriptDoc): string {
 
 function scriptDocToDocx(doc: ScriptDoc): Buffer {
   const paragraphs = linesFromScriptDoc(doc)
-    .map((line) => `<w:p><w:r><w:t xml:space="preserve">${line}</w:t></w:r></w:p>`)
+    .map((line) => `<w:p><w:r><w:t xml:space=\"preserve\">${line}</w:t></w:r></w:p>`)
     .join("");
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
   <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -349,131 +354,6 @@ function buildFileName(projectId: string, extension: string): string {
   return `${projectId}-${timestamp}.${extension}`;
 }
 
-async function renderExport(payload: ExportQueuePayload): Promise<RenderedExportResult> {
-  switch (payload.format) {
-    case "fountain":
-      return {
-        buffer: Buffer.from(scriptDocToFountain(payload.scriptDoc), "utf8"),
-        extension: "fountain",
-        mime: "text/plain;charset=utf-8",
-        notes: "Generated from script document",
-      };
-    case "fdx":
-      return {
-        buffer: Buffer.from(scriptDocToFdx(payload.scriptDoc), "utf8"),
-        extension: "fdx",
-        mime: "application/xml",
-        notes: "Simplified Final Draft XML",
-      };
-    case "docx":
-      return {
-        buffer: scriptDocToDocx(payload.scriptDoc),
-        extension: "docx",
-        mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        notes: "Minimal WordprocessingML payload",
-      };
-    case "pdf":
-      return {
-        buffer: scriptDocToPdf(payload.scriptDoc),
-        extension: "pdf",
-        mime: "application/pdf",
-        notes: "Stub PDF content for preview flows",
-      };
-    default:
-      throw new Error(`Unsupported export format: ${payload.format}`);
-  }
-}
-
-class LocalExportQueue {
-  private payloads = new Map<string, ExportQueuePayload>();
-
-  async enqueue(payload: ExportQueuePayload): Promise<ExportJob> {
-    const job = await createExportJobRecord(payload);
-    this.payloads.set(job.id, payload);
-    setTimeout(() => {
-      void this.processJob(job.id).catch((error) => {
-        console.error("Export job processing failed", error);
-      });
-    }, 10);
-    return job;
-  }
-
-  async getJob(jobId: string): Promise<ExportJob | null> {
-    return fetchExportJobRecord(jobId);
-  }
-
-  private async processJob(jobId: string): Promise<void> {
-    const payload = this.payloads.get(jobId);
-    if (!payload) {
-      return;
-    }
-
-    await updateExportJobRecord(jobId, { status: "processing" });
-
-    try {
-      const rendered = await renderExport(payload);
-      const fileName = buildFileName(payload.projectId, rendered.extension);
-      await updateExportJobRecord(jobId, {
-        status: "succeeded",
-        result: {
-          fileName,
-          downloadUrl: createDataUrl(rendered.buffer, rendered.mime),
-          notes: rendered.notes,
-        },
-        error: null,
-      });
-    } catch (error) {
-      await updateExportJobRecord(jobId, {
-        status: "failed",
-        error: error instanceof Error ? error.message : "Export failed",
-      });
-    } finally {
-      this.payloads.delete(jobId);
-    }
-  }
-}
-
-const globalQueueRef = globalThis as typeof globalThis & {
-  __scriptSpeechExportQueue?: LocalExportQueue;
-};
-
-export function getExportQueue(): LocalExportQueue {
-  if (!globalQueueRef.__scriptSpeechExportQueue) {
-    globalQueueRef.__scriptSpeechExportQueue = new LocalExportQueue();
-  }
-  return globalQueueRef.__scriptSpeechExportQueue;
-}
-
-export function enqueueExportJob(payload: ExportQueuePayload): Promise<ExportJob> {
-  return getExportQueue().enqueue(payload);
-}
-
-export function getExportJob(jobId: string): Promise<ExportJob | null> {
-  return getExportQueue().getJob(jobId);
-}
-
-let sharedQueue: ExportQueue | LocalExportQueue | null = null;
-
-export function getExportQueue(): ExportQueue | LocalExportQueue {
-  if (sharedQueue) {
-    return sharedQueue;
-  }
-
-  sharedQueue = isSupabaseConfigured() ? new ExportQueue() : getLocalExportQueue();
-  return sharedQueue;
-}
-
-export async function enqueueExportJob(payload: EnqueuePayload): Promise<ExportJob> {
-  const queue = getExportQueue();
-  return queue.enqueue(payload);
-}
-
-export async function getExportJob(jobId: string): Promise<ExportJob | null> {
-  const queue = getExportQueue();
-  return queue.getJob(jobId);
-}
-
 export function formatSseEvent(event: string, data: string): string {
   return `event: ${event}\ndata: ${data}\n\n`;
 }
-

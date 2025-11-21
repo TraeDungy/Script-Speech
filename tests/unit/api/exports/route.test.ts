@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "@/app/api/exports/route";
 import { requireServerAuthSession } from "@/lib/auth/server";
 import { ensureProjectMembership } from "@/lib/authz/projects.server";
-import { createQueuedExportJob, getExportJobForUser, listExportJobsForUser } from "@/lib/exports/jobs";
+import { enqueueExportJob, getExportJob } from "@/lib/exports";
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
-import { updateExportJobForUser } from "@/lib/exports/jobs";
+import { listExportJobsForUser } from "@/lib/db/exportJobs";
 import { recordBusinessEvent, withSpan } from "@/lib/observability";
 
 const logSpy = vi.fn();
@@ -24,11 +24,13 @@ vi.mock("@/lib/supabase.server", () => ({
   getSupabaseServiceClient: vi.fn(),
 }));
 
-vi.mock("@/lib/exports/jobs", () => ({
-  createQueuedExportJob: vi.fn(),
-  getExportJobForUser: vi.fn(),
+vi.mock("@/lib/exports", () => ({
+  enqueueExportJob: vi.fn(),
+  getExportJob: vi.fn(),
+}));
+
+vi.mock("@/lib/db/exportJobs", () => ({
   listExportJobsForUser: vi.fn(),
-  updateExportJobForUser: vi.fn(),
 }));
 
 vi.mock("@/lib/observability", () => ({
@@ -98,8 +100,7 @@ describe("exports API", () => {
       errorMessage: null,
     } as const;
 
-    (createQueuedExportJob as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(job);
-    (updateExportJobForUser as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (enqueueExportJob as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(job);
 
     const response = await POST(
       new Request("http://localhost/api/exports", {
@@ -112,7 +113,7 @@ describe("exports API", () => {
 
     expect(response.status).toBe(202);
     expect(payload).toMatchObject(job);
-    expect(createQueuedExportJob).toHaveBeenCalledWith(
+    expect(enqueueExportJob).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "user-1", format: "pdf" }),
     );
     expect(recordBusinessEvent).toHaveBeenCalledWith(
@@ -131,14 +132,14 @@ describe("exports API", () => {
   it("returns a users export job when an id is provided", async () => {
     (getSupabaseServiceClient as unknown as ReturnType<typeof vi.fn>).mockReturnValue(supabaseMock);
     const job = { id: "job-2", userId: "user-1", status: "queued" };
-    (getExportJobForUser as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(job);
+    (getExportJob as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(job);
 
     const response = await GET(new Request("http://localhost/api/exports?id=job-2"));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(payload).toEqual(job);
-    expect(getExportJobForUser).toHaveBeenCalledWith("job-2", "user-1");
+    expect(getExportJob).toHaveBeenCalledWith("job-2");
   });
 
   it("lists export jobs for the authenticated user when no id is provided", async () => {

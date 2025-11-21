@@ -14,10 +14,10 @@ const authModule = vi.hoisted(() => {
 vi.mock("@/lib/auth/server", () => authModule);
 
 const jobsModule = vi.hoisted(() => ({
-  getExportJobForUser: vi.fn(),
+  getExportJob: vi.fn(),
 }));
 
-vi.mock("@/lib/exports/jobs", () => jobsModule);
+vi.mock("@/lib/exports", () => jobsModule);
 
 const supabase = {
   storage: {
@@ -34,7 +34,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   supabase.storage.from.mockReturnThis();
   supabase.storage.createSignedUrl.mockResolvedValue({ data: { signedUrl: "https://download" } });
-  jobsModule.getExportJobForUser.mockResolvedValue({
+  jobsModule.getExportJob.mockResolvedValue({
     id: "job-1",
     userId: "user-1",
     status: "succeeded",
@@ -51,14 +51,14 @@ describe("/api/exports/[jobId]/download", () => {
   });
 
   it("returns 409 if the job is not ready", async () => {
-    jobsModule.getExportJobForUser.mockResolvedValueOnce({ id: "job-1", status: "processing" });
+    jobsModule.getExportJob.mockResolvedValueOnce({ id: "job-1", status: "processing" });
     const request = new NextRequest("http://localhost/api/exports/job-1/download");
     const response = await GET(request, { params: { jobId: "job-1" } });
     expect(response.status).toBe(409);
   });
 
   it("returns 404 for missing jobs", async () => {
-    jobsModule.getExportJobForUser.mockResolvedValueOnce(null);
+    jobsModule.getExportJob.mockResolvedValueOnce(null);
     const request = new NextRequest("http://localhost/api/exports/missing/download");
     const response = await GET(request, { params: { jobId: "missing" } });
     expect(response.status).toBe(404);

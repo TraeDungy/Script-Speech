@@ -4,7 +4,6 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import type {
   ScriptFormatDefinition,
   ScriptFormatId,
-  ScriptFormatLengthProfile,
 } from "@/lib/scriptFormats";
 
 export type ScriptFormat = ScriptFormatId;

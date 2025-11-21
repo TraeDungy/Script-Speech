@@ -3,10 +3,10 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { GET } from "./route";
 
 const jobsModule = vi.hoisted(() => ({
-  getExportJobForUser: vi.fn(),
+  getExportJob: vi.fn(),
 }));
 
-vi.mock("@/lib/exports/jobs", () => jobsModule);
+vi.mock("@/lib/exports", () => jobsModule);
 
 const authModule = vi.hoisted(() => {
   class UnauthorizedError extends Error {}
@@ -19,7 +19,7 @@ const authModule = vi.hoisted(() => {
 vi.mock("@/lib/auth/server", () => authModule);
 
 const mockRequireServerAuthSession = authModule.requireServerAuthSession;
-const mockGetExportJobForUser = jobsModule.getExportJobForUser;
+const mockGetExportJobForUser = jobsModule.getExportJob;
 
 describe("/api/exports/[jobId]", () => {
   beforeEach(() => {

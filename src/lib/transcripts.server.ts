@@ -510,7 +510,6 @@ export interface StoredSessionMetadata extends OrchestratorSessionMetadata {}
 
 export async function fetchSessionMetadata(sessionId: string): Promise<StoredSessionMetadata | null> {
   const client = getClient();
-  const redis = getRedisClient();
 
   if (client) {
     try {
@@ -533,7 +532,6 @@ export async function fetchSessionMetadata(sessionId: string): Promise<StoredSes
 
 export async function persistTranscriptTurn(turn: TranscriptTurnDTO & { sessionId: string }): Promise<void> {
   const client = getClient();
-  const redis = getRedisClient();
 
   await executeWithFallback([
     async () => {

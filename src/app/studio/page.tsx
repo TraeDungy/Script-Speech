@@ -800,7 +800,7 @@ function ConceptIntelligencePanel() {
           Optimal storytelling vehicles
         </h3>
         <p className="mt-2 text-sm text-zinc-400">
-          Script Speech's LLM scans concept language to align length, medium, and genre fit across
+          Script Speech&apos;s LLM scans concept language to align length, medium, and genre fit across
           the format registry.
         </p>
         {recommendedFormats.length ? (

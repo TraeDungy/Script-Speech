@@ -49,8 +49,6 @@ vi.mock("@/lib/requestContext", () => ({
   createRequestLogger: () => vi.fn(),
 }));
 
-const mockRecordApiRequest = observabilityModule.recordApiRequest;
-const mockRecordApiError = observabilityModule.recordApiError;
 const mockCaptureApiException = observabilityModule.captureApiException;
 
 beforeEach(() => {
