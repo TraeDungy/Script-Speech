@@ -38,11 +38,16 @@ const observabilityModule = vi.hoisted(() => ({
   recordApiError: vi.fn(),
   captureApiException: vi.fn(),
   logStructuredEvent: vi.fn(),
+  recordBusinessEvent: vi.fn(),
   withSpan: async (_options: unknown, fn: (span: { setAttribute: () => void }) => Promise<NextResponse>) =>
     fn({ setAttribute: () => {} }),
 }));
 
 vi.mock("@/lib/observability", () => observabilityModule);
+vi.mock("@/lib/requestContext", () => ({
+  getRequestIdFromHeaders: vi.fn(() => "app-request-id"),
+  createRequestLogger: () => vi.fn(),
+}));
 
 const mockRecordApiRequest = observabilityModule.recordApiRequest;
 const mockRecordApiError = observabilityModule.recordApiError;
@@ -58,7 +63,7 @@ describe("/api/request-access", () => {
       { id: "1", email: "demo@example.com", submittedAt: new Date().toISOString() },
     ]);
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/request-access"));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       requests: [{ id: "1", email: "demo@example.com", submittedAt: expect.any(String) }],

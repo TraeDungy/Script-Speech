@@ -1,9 +1,13 @@
+import { headers } from "next/headers";
+
 import type { StudioHydrationPayload } from "@/lib/db/projects";
 import type { EntityAsset, ReferenceAsset } from "@/lib/types/assets";
 
 import { listEntityAssets, listReferenceAssets } from "@/lib/assets";
 import { requireServerAuthSession } from "@/lib/auth/server";
 import { getStudioHydration } from "@/lib/db/projects";
+import { recordBusinessEvent, withSpan } from "@/lib/observability";
+import { createRequestLogger, getRequestIdFromHeaders } from "@/lib/requestContext";
 import {
   captureProjectSlots,
   confirmProjectSession,
@@ -65,12 +69,35 @@ export async function confirmStudioSessionAction(input: {
   summary?: StudioSlotPayload | null;
 }): Promise<StudioSessionRecord> {
   const { user } = await requireServerAuthSession();
-  return confirmProjectSession({
-    sessionId: input.sessionId,
-    projectId: input.projectId,
-    userId: user.id,
-    summary: input.summary ?? null,
-  });
+  const requestId = getRequestIdFromHeaders(headers());
+  const log = createRequestLogger(requestId);
+
+  return withSpan(
+    {
+      name: "action.studio.confirm-session",
+      attributes: { sessionId: input.sessionId, projectId: input.projectId, requestId },
+    },
+    async (span) => {
+      const confirmation = await confirmProjectSession({
+        sessionId: input.sessionId,
+        projectId: input.projectId,
+        userId: user.id,
+        summary: input.summary ?? null,
+      });
+
+      recordBusinessEvent("onboarding_completion_total", "Completed studio onboarding", {
+        projectId: input.projectId,
+      });
+      span.setAttribute("studio.confirmed", true);
+      log({
+        level: "info",
+        message: "studio.session.confirmed",
+        context: { sessionId: input.sessionId, projectId: input.projectId, requestId },
+      });
+
+      return confirmation;
+    },
+  );
 }
 
 export async function persistStudioTranscript(input: {

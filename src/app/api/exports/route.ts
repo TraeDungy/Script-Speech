@@ -13,6 +13,12 @@ import type { ExportJob } from "@/lib/exports/types";
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
 import { SUPABASE_STORAGE_BUCKET } from "@/lib/storage/config";
 import { ensureProjectMembership, ProjectAuthorizationError } from "@/lib/authz/projects.server";
+import { recordBusinessEvent, withSpan } from "@/lib/observability";
+import {
+  REQUEST_ID_HEADER,
+  createRequestLogger,
+  getRequestIdFromHeaders,
+} from "@/lib/requestContext";
 
 interface ExportRequestPayload {
   scriptDocId?: string;
@@ -37,6 +43,8 @@ function extractProjectId(payload: unknown): string | null {
 }
 
 export async function POST(request: Request) {
+  const requestId = getRequestIdFromHeaders(request.headers);
+  const log = createRequestLogger(requestId);
   let body: ExportRequestPayload;
   try {
     body = await request.json();
@@ -53,37 +61,56 @@ export async function POST(request: Request) {
 
   const { user } = await requireServerAuthSession();
   try {
-    const fetchedDoc = body.scriptDocId ? await fetchScriptDoc(body.scriptDocId, user.id) : null;
-    const scriptDocPayload = body.content ?? fetchedDoc?.doc ?? null;
+    return await withSpan(
+      {
+        name: "api.exports.post",
+        attributes: { route: "/api/exports", requestId, userId: user.id },
+      },
+      async (span) => {
+        const fetchedDoc = body.scriptDocId ? await fetchScriptDoc(body.scriptDocId, user.id) : null;
+        const scriptDocPayload = body.content ?? fetchedDoc?.doc ?? null;
 
-    const projectId = extractProjectId(scriptDocPayload) ?? fetchedDoc?.projectId ?? null;
-    if (projectId) {
-      await ensureProjectMembership(projectId, user.id, { minimumRole: "viewer" });
-    }
+        const projectId = extractProjectId(scriptDocPayload) ?? fetchedDoc?.projectId ?? null;
+        if (projectId) {
+          await ensureProjectMembership(projectId, user.id, { minimumRole: "viewer" });
+        }
 
-    const supabase = getSupabaseServiceClient();
-    if (!supabase) {
-      return NextResponse.json({ error: "Supabase client unavailable" }, { status: 503 });
-    }
+        const supabase = getSupabaseServiceClient();
+        if (!supabase) {
+          return NextResponse.json({ error: "Supabase client unavailable" }, { status: 503 });
+        }
 
-    if (!scriptDocPayload) {
-      return NextResponse.json({ error: "ScriptDoc not found" }, { status: 404 });
-    }
+        if (!scriptDocPayload) {
+          return NextResponse.json({ error: "ScriptDoc not found" }, { status: 404 });
+        }
 
-    const job = await createQueuedExportJob({
-      userId: user.id,
-      projectId,
-      scriptDocId: body.scriptDocId ?? null,
-      scriptDoc: scriptDocPayload,
-      format: body.format ?? "pdf",
-      deliverToEmail: body.deliverToEmail,
-    });
+        const job = await createQueuedExportJob({
+          userId: user.id,
+          projectId,
+          scriptDocId: body.scriptDocId ?? null,
+          scriptDoc: scriptDocPayload,
+          format: body.format ?? "pdf",
+          deliverToEmail: body.deliverToEmail,
+        });
 
-    void processJobArtifact(job, scriptDocPayload).catch((error) => {
-      console.error("Failed to process export job", error);
-    });
+        span.setAttribute("export.jobId", job.id);
+        span.setAttribute("export.format", job.format);
 
-    return NextResponse.json(job, { status: 202 });
+        recordBusinessEvent("export_jobs_enqueued_total", "Queued export jobs", {
+          format: job.format,
+          hasProject: Boolean(projectId),
+        });
+
+        void processJobArtifact(job, scriptDocPayload, { requestId }).catch((error) => {
+          log({ level: "error", message: "export.job.process.failed", error });
+        });
+
+        return NextResponse.json(job, {
+          status: 202,
+          headers: requestId ? { [REQUEST_ID_HEADER]: requestId } : {},
+        });
+      },
+    );
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -92,7 +119,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    console.error("Unable to queue export job", error);
+    log({ level: "error", message: "export.queue.failed", error, context: { requestId } });
     return NextResponse.json({ error: "Unable to queue export job" }, { status: 500 });
   }
 }
@@ -132,7 +159,11 @@ async function fetchScriptDoc(
   return { doc: data.doc, projectId: data.project_id ?? null };
 }
 
-async function processJobArtifact(job: ExportJob, content: unknown): Promise<void> {
+async function processJobArtifact(
+  job: ExportJob,
+  content: unknown,
+  context?: { requestId?: string },
+): Promise<void> {
   const supabase = getSupabaseServiceClient();
   if (!supabase) {
     return;
@@ -168,15 +199,26 @@ async function processJobArtifact(job: ExportJob, content: unknown): Promise<voi
       download_path: downloadPath,
       error_message: null,
     });
+    recordBusinessEvent("export_jobs_completed_total", "Completed export jobs", {
+      format: job.format,
+      storage: SUPABASE_STORAGE_BUCKET,
+    });
   } catch (error) {
+    recordBusinessEvent("export_jobs_failed_total", "Failed export jobs", {
+      format: job.format,
+    });
     await updateExportJobForUser(job.id, job.userId ?? "", {
       status: "failed",
       error_message: error instanceof Error ? error.message : "Failed to render export",
     });
+    const log = createRequestLogger(context?.requestId);
+    log({ level: "error", message: "export.job.storage.failed", error, context: { jobId: job.id } });
   }
 }
 
 export async function GET(request: Request) {
+  const requestId = getRequestIdFromHeaders(request.headers);
+  const log = createRequestLogger(requestId);
   const jobId = new URL(request.url).searchParams.get("id");
 
   try {
@@ -198,7 +240,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    console.error("Failed to load export job", error);
+    log({ level: "error", message: "export.job.fetch.failed", error });
     return NextResponse.json({ error: "Failed to load export job" }, { status: 500 });
   }
 }
