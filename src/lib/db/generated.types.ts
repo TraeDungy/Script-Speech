@@ -61,6 +61,7 @@ export type Database = {
           genre: string | null;
           id: string;
           logline: string | null;
+          metadata: Json;
           owner_id: string | null;
           script_type: string;
           status: 'outline' | 'draft' | 'polish' | 'locked';
@@ -68,6 +69,7 @@ export type Database = {
           target_length_unit: 'pages' | 'minutes' | 'seconds' | null;
           target_length_value: number | null;
           title: string;
+          user_id: string | null;
           updated_at: string;
         };
         Insert: {
@@ -75,6 +77,7 @@ export type Database = {
           genre?: string | null;
           id?: string;
           logline?: string | null;
+          metadata?: Json;
           owner_id?: string | null;
           script_type: string;
           status?: 'outline' | 'draft' | 'polish' | 'locked';
@@ -82,6 +85,7 @@ export type Database = {
           target_length_unit?: 'pages' | 'minutes' | 'seconds' | null;
           target_length_value?: number | null;
           title: string;
+          user_id?: string | null;
           updated_at?: string;
         };
         Update: {
@@ -89,6 +93,7 @@ export type Database = {
           genre?: string | null;
           id?: string;
           logline?: string | null;
+          metadata?: Json;
           owner_id?: string | null;
           script_type?: string;
           status?: 'outline' | 'draft' | 'polish' | 'locked';
@@ -96,42 +101,59 @@ export type Database = {
           target_length_unit?: 'pages' | 'minutes' | 'seconds' | null;
           target_length_value?: number | null;
           title?: string;
+          user_id?: string | null;
           updated_at?: string;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: 'projects_user_id_fkey';
+            columns: ['user_id'];
+            referencedRelation: 'users';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       script_docs: {
         Row: {
           created_at: string;
           doc: Json;
           id: string;
+          metadata: Json;
           project_id: string;
           record_type: 'version' | 'autosave';
           revision_id: string | null;
           source_version_id: string | null;
+          transcript_refs: string[] | null;
           updated_at: string;
+          user_id: string | null;
           version_number: number | null;
         };
         Insert: {
           created_at?: string;
           doc: Json;
           id?: string;
+          metadata?: Json;
           project_id: string;
           record_type: 'version' | 'autosave';
           revision_id?: string | null;
           source_version_id?: string | null;
+          transcript_refs?: string[] | null;
           updated_at?: string;
+          user_id?: string | null;
           version_number?: number | null;
         };
         Update: {
           created_at?: string;
           doc?: Json;
           id?: string;
+          metadata?: Json;
           project_id?: string;
           record_type?: 'version' | 'autosave';
           revision_id?: string | null;
           source_version_id?: string | null;
+          transcript_refs?: string[] | null;
           updated_at?: string;
+          user_id?: string | null;
           version_number?: number | null;
         };
         Relationships: [
@@ -139,6 +161,12 @@ export type Database = {
             foreignKeyName: 'script_docs_project_id_fkey';
             columns: ['project_id'];
             referencedRelation: 'projects';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'script_docs_user_id_fkey';
+            columns: ['user_id'];
+            referencedRelation: 'users';
             referencedColumns: ['id'];
           },
         ];
