@@ -7,14 +7,18 @@ import {
   ProjectAuthorizationError,
 } from "@/lib/authz/projects.server";
 import { fetchLatestScriptDoc } from "@/lib/db/scriptDocs";
+import { ScriptDocAiOrchestrator } from "@/lib/ai/orchestration.service";
 import { evaluatePromptGuardrails } from "@/lib/orchestrator/guardrails";
-import { ScriptDocOrchestratorService } from "@/lib/orchestrator/scriptDocOrchestrator.server";
 import {
   searchScriptDocEmbeddings,
   upsertScriptDocEmbeddings,
 } from "@/lib/retrieval/referenceRetrieval.server";
+import {
+  searchReferenceAssetEmbeddings,
+  upsertReferenceAssetEmbeddings,
+} from "@/lib/retrieval/referenceAssetsVector.server";
 
-const service = new ScriptDocOrchestratorService();
+const service = new ScriptDocAiOrchestrator();
 
 export async function POST(
   request: NextRequest,
@@ -57,38 +61,49 @@ export async function POST(
 
     const docId = record.doc.revision?.id ?? `${projectId}-draft`;
 
-    await upsertScriptDocEmbeddings({
-      projectId,
-      docId,
-      doc: record.doc,
-      referenceAssets: references,
-      entityAssets,
-    }).catch((error) => {
-      console.error("Failed to sync embeddings", error);
-    });
+    await Promise.all([
+      upsertScriptDocEmbeddings({
+        projectId,
+        docId,
+        doc: record.doc,
+        referenceAssets: references,
+        entityAssets,
+      }).catch((error) => {
+        console.error("Failed to sync ScriptDoc embeddings", error);
+      }),
+      upsertReferenceAssetEmbeddings({ projectId, assets: references }).catch((error) => {
+        console.error("Failed to sync reference asset embeddings", error);
+      }),
+    ]);
 
-    const contextMatches = await searchScriptDocEmbeddings({
-      projectId,
-      docId,
-      query: body.prompt,
-      matchCount: 8,
-    }).catch((error) => {
-      console.error("Failed to search embeddings", error);
-      return [];
-    });
+    const [contextMatches, referenceMatches] = await Promise.all([
+      searchScriptDocEmbeddings({
+        projectId,
+        docId,
+        query: body.prompt,
+        matchCount: 8,
+      }).catch((error) => {
+        console.error("Failed to search ScriptDoc embeddings", error);
+        return [];
+      }),
+      searchReferenceAssetEmbeddings({
+        projectId,
+        query: body.prompt,
+        matchCount: 6,
+      }).catch((error) => {
+        console.error("Failed to search reference asset embeddings", error);
+        return [];
+      }),
+    ]);
 
-    const orchestration = await service.generate({
+    const orchestration = await service.orchestrate({
       doc: record.doc,
       prompt: body.prompt,
-      contextMatches,
+      scriptContext: contextMatches,
+      referenceContext: referenceMatches,
     });
 
-    return NextResponse.json({
-      plan: orchestration.plan,
-      beats: orchestration.beats,
-      scenes: orchestration.scenes,
-      context: orchestration.context,
-    });
+    return NextResponse.json({ update: orchestration });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
