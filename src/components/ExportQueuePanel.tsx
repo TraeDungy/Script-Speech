@@ -186,6 +186,7 @@ export function ExportQueuePanel({ projectId }: ExportQueuePanelProps) {
   const [isSubmitting, setIsSubmitting] = useState<ExportFormat | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const doc = useScriptDocStore((state) => state.doc);
   const exportDoc = useMemo(() => convertScriptDocForExport(doc), [doc]);
   const scriptDocId = doc?.revision?.id ?? null;
@@ -198,6 +199,43 @@ export function ExportQueuePanel({ projectId }: ExportQueuePanelProps) {
 
   const upsertJob = useCallback((job: ExportJob) => {
     setJobs((previous) => ({ ...previous, [job.id]: { ...previous[job.id], ...job } }));
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const fetchJobs = async () => {
+      setIsLoading(true);
+      try {
+        const response = await fetch("/api/exports", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Unable to load exports");
+        }
+
+        const payload = (await response.json()) as ExportJob[];
+        if (!isActive) return;
+
+        const nextJobs: JobsState = {};
+        payload.forEach((job) => {
+          nextJobs[job.id] = job;
+        });
+        setJobs(nextJobs);
+      } catch (loadError) {
+        if (isActive) {
+          setError(loadError instanceof Error ? loadError.message : "Unable to load exports");
+        }
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void fetchJobs();
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
   const queueExport = async (format: ExportFormat) => {
@@ -281,6 +319,7 @@ export function ExportQueuePanel({ projectId }: ExportQueuePanelProps) {
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs uppercase tracking-[0.35em] text-zinc-500">
           <span>Active jobs</span>
+          {isLoading ? <span className="text-[0.6rem] text-zinc-400">Refreshing…</span> : null}
         </div>
         {orderedJobs.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-zinc-500">

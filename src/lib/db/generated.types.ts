@@ -23,7 +23,7 @@ export type Database = {
           result: Json | null;
           script_doc: Json;
           script_doc_id: string | null;
-          status: 'queued' | 'processing' | 'succeeded' | 'failed';
+          status: 'queued' | 'processing' | 'succeeded' | 'failed' | 'completed';
           storage_bucket: string | null;
           storage_driver: string | null;
           storage_path: string | null;
@@ -43,7 +43,7 @@ export type Database = {
           result?: Json | null;
           script_doc: Json;
           script_doc_id?: string | null;
-          status?: 'queued' | 'processing' | 'succeeded' | 'failed';
+          status?: 'queued' | 'processing' | 'succeeded' | 'failed' | 'completed';
           storage_bucket?: string | null;
           storage_driver?: string | null;
           storage_path?: string | null;
@@ -63,7 +63,7 @@ export type Database = {
           result?: Json | null;
           script_doc?: Json;
           script_doc_id?: string | null;
-          status?: 'queued' | 'processing' | 'succeeded' | 'failed';
+          status?: 'queued' | 'processing' | 'succeeded' | 'failed' | 'completed';
           storage_bucket?: string | null;
           storage_driver?: string | null;
           storage_path?: string | null;

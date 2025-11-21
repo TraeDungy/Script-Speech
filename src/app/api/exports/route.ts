@@ -6,6 +6,7 @@ import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
 import {
   createQueuedExportJob,
   getExportJobForUser,
+  listExportJobsForUser,
   updateExportJobForUser,
 } from "@/lib/exports/jobs";
 import type { ExportJob } from "@/lib/exports/types";
@@ -17,6 +18,21 @@ interface ExportRequestPayload {
   content?: unknown;
   format?: ExportJob["format"];
   deliverToEmail?: string;
+}
+
+function extractProjectId(payload: unknown): string | null {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "metadata" in payload &&
+    payload.metadata &&
+    typeof payload.metadata === "object" &&
+    "projectId" in payload.metadata &&
+    typeof payload.metadata.projectId === "string"
+  ) {
+    return payload.metadata.projectId;
+  }
+  return null;
 }
 
 export async function POST(request: Request) {
@@ -51,6 +67,7 @@ export async function POST(request: Request) {
 
     const job = await createQueuedExportJob({
       userId: user.id,
+      projectId: extractProjectId(scriptDocPayload),
       scriptDocId: body.scriptDocId ?? null,
       scriptDoc: scriptDocPayload,
       format: body.format ?? "pdf",
@@ -132,7 +149,7 @@ async function processJobArtifact(job: ExportJob, content: unknown): Promise<voi
     }
 
     await updateExportJobForUser(job.id, job.userId ?? "", {
-      status: "succeeded",
+      status: "completed",
       download_path: downloadPath,
       error_message: null,
     });
@@ -146,19 +163,21 @@ async function processJobArtifact(job: ExportJob, content: unknown): Promise<voi
 
 export async function GET(request: Request) {
   const jobId = new URL(request.url).searchParams.get("id");
-  if (!jobId) {
-    return NextResponse.json({ error: "Missing job id" }, { status: 400 });
-  }
 
   try {
     const { user } = await requireServerAuthSession();
+    if (!jobId) {
+      const jobs = await listExportJobsForUser(user.id);
+      return NextResponse.json(jobs, { headers: { "Cache-Control": "no-cache, no-store" } });
+    }
+
     const job = await getExportJobForUser(jobId, user.id);
 
     if (!job) {
       return NextResponse.json({ error: "Export job not found" }, { status: 404 });
     }
 
-    return NextResponse.json(job);
+    return NextResponse.json(job, { headers: { "Cache-Control": "no-cache, no-store" } });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

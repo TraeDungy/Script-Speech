@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: { params: { jobId: stri
       return NextResponse.json({ error: "Export job not found" }, { status: 404 });
     }
 
-    if (job.status !== "succeeded" || !job.downloadPath) {
+    if (!(job.status === "succeeded" || job.status === "completed") || !job.downloadPath) {
       return NextResponse.json({ error: "Export not ready" }, { status: 409 });
     }
 
