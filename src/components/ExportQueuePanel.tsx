@@ -116,6 +116,10 @@ function ExportJobRow({ job, onUpdate }: { job: ExportJob; onUpdate: (job: Expor
   const { job: liveJob, error } = useExportJobStatus(job.id, { initialJob: job });
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const resolvedJob = liveJob ?? job;
+  const hasArtifact =
+    Boolean(resolvedJob.downloadPath) ||
+    Boolean(resolvedJob.result?.downloadUrl) ||
+    Boolean(resolvedJob.result?.storagePath);
   const statusStyle = statusStyles[resolvedJob.status];
 
   useEffect(() => {
@@ -160,14 +164,14 @@ function ExportJobRow({ job, onUpdate }: { job: ExportJob; onUpdate: (job: Expor
           {resolvedJob.status}
         </span>
       </div>
-      {resolvedJob.downloadPath && (resolvedJob.status === "succeeded" || resolvedJob.status === "completed") ? (
+      {hasArtifact && (resolvedJob.status === "succeeded" || resolvedJob.status === "completed") ? (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <button
             type="button"
             onClick={handleDownload}
             className="inline-flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-1 text-white transition hover:border-white/40 hover:bg-white/20"
           >
-            Download {resolvedJob.downloadPath.split("/").pop() ?? "export"}
+            Download {resolvedJob.result?.fileName ?? resolvedJob.downloadPath?.split("/").pop() ?? "export"}
           </button>
         </div>
       ) : null}

@@ -16,7 +16,7 @@ const RESPONSES_URL = "https://api.openai.com/v1/responses";
 const RESPONSES_MODEL = process.env.OPENAI_RESPONSES_MODEL ?? "gpt-4.1-mini";
 const MAX_RETRIES = Number(process.env.SCRIPT_DOC_ORCHESTRATOR_RETRIES ?? 2);
 
-interface StructuredStepOptions<T> {
+interface StructuredStepOptions {
   schemaName: string;
   schema: typeof plannerResponseSchema | typeof beatResponseSchema | typeof sceneBatchSchema;
   systemPrompt: string;
@@ -80,7 +80,7 @@ function buildContextBlock(matches: RetrievalMatch[], references: ReferenceAsset
 }
 
 export class ScriptDocAiOrchestrator {
-  private async callStructuredStep<T>(options: StructuredStepOptions<T>): Promise<T> {
+  private async callStructuredStep<T>(options: StructuredStepOptions): Promise<T> {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new Error("OPENAI_API_KEY is not configured");

@@ -1,50 +1,55 @@
 import { NextResponse } from "next/server";
 
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
-import { getExportJobForUser } from "@/lib/exports/jobs";
+import { getExportJob } from "@/lib/exports";
+import { recordExportDownload } from "@/lib/db/exportDownloads";
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
-import { STORAGE_SIGNED_URL_TTL_SECONDS, SUPABASE_STORAGE_BUCKET } from "@/lib/storage/config";
-
-const TTL_SECONDS = STORAGE_SIGNED_URL_TTL_SECONDS;
+import { SUPABASE_STORAGE_BUCKET } from "@/lib/storage/config";
 
 export async function GET(_request: Request, { params }: { params: { jobId: string } }) {
   try {
     const { user } = await requireServerAuthSession();
-    const job = await getExportJobForUser(params.jobId, user.id);
+    const job = await getExportJob(params.jobId);
 
-    if (!job) {
+    if (!job || (job.userId && job.userId !== user.id)) {
       return NextResponse.json({ error: "Export job not found" }, { status: 404 });
     }
 
-    if (!(job.status === "succeeded" || job.status === "completed") || !job.downloadPath) {
-      return NextResponse.json({ error: "Export not ready" }, { status: 409 });
+    const directUrl = job.result?.downloadUrl;
+    if (directUrl) {
+      return NextResponse.json({ url: directUrl });
+    }
+
+    const bucket = job.result?.storageBucket ?? SUPABASE_STORAGE_BUCKET;
+    const path = job.result?.storagePath ?? job.downloadPath;
+    if (!bucket || !path) {
+      const notReady = job.status === "queued" || job.status === "processing";
+      return NextResponse.json(
+        { error: notReady ? "Export is still processing" : "No downloadable artifact is available" },
+        { status: notReady ? 409 : 404 },
+      );
     }
 
     const supabase = getSupabaseServiceClient();
-    if (!supabase || !SUPABASE_STORAGE_BUCKET) {
-      return NextResponse.json({ error: "Downloads are unavailable" }, { status: 503 });
+    if (!supabase) {
+      return NextResponse.json({ error: "Supabase client unavailable" }, { status: 503 });
     }
 
-    const { data, error } = await supabase.storage
-      .from(SUPABASE_STORAGE_BUCKET)
-      .createSignedUrl(job.downloadPath, TTL_SECONDS, {
-        download: job.downloadPath.split("/").pop() ?? "export.json",
-      });
-
+    const expiresIn = 60 * 10; // 10 minutes
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, expiresIn);
     if (error || !data?.signedUrl) {
-      console.error("Failed to sign download", error);
-      return NextResponse.json({ error: "Unable to sign download" }, { status: 500 });
+      return NextResponse.json({ error: "Unable to generate signed download URL" }, { status: 500 });
     }
 
-    return NextResponse.json(
-      { url: data.signedUrl, expiresAt: new Date(Date.now() + TTL_SECONDS * 1000).toISOString() },
-      { headers: { "Cache-Control": "no-cache, no-store, max-age=0" } },
-    );
+    const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+    await recordExportDownload({ jobId: job.id, signedUrl: data.signedUrl, expiresAt, userId: user.id });
+
+    return NextResponse.json({ url: data.signedUrl });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     console.error("Failed to generate export download", error);
-    return NextResponse.json({ error: "Failed to generate download" }, { status: 500 });
+    return NextResponse.json({ error: "Unable to generate download link" }, { status: 500 });
   }
 }

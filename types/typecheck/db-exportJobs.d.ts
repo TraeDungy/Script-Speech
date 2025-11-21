@@ -4,12 +4,14 @@ import type { ExportJob } from "@/lib/exports/types";
 export interface ExportJobRow {
   id: string;
   project_id: string;
+  user_id?: string | null;
   format: string;
   status: string;
   deliver_to_email?: string | null;
   script_doc: unknown;
   result?: unknown;
   error?: string | null;
+  storage_path?: string | null;
   created_at: string;
   updated_at: string;
 }

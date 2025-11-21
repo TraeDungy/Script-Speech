@@ -13,9 +13,9 @@ declare module "@sentry/node" {
   export function captureException(error: unknown, context?: CaptureContext): unknown;
 }
 declare module "@playwright/test" {
-  export const expect: any;
-  export const test: any;
+  export const expect: (actual: unknown) => unknown;
+  export const test: (name: string, fn: (...args: unknown[]) => unknown) => void;
   export function defineConfig(config: unknown): unknown;
-  const configExport: any;
+  const configExport: unknown;
   export default configExport;
 }
