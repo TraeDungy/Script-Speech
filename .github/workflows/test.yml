@@ -1,0 +1,26 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ""
+      SUPABASE_KEY: ""
+      SUPABASE_SERVICE_ROLE_KEY: ""
+      NEXT_PUBLIC_SUPABASE_URL: ""
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ""
+      CI: "true"
+      NODE_ENV: test
+      VITEST_BROWSER_HEADLESS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test -- --runInBand --coverage

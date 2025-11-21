@@ -7,7 +7,7 @@
 - `src/data` stores the local marketing content fallbacks (landing hero, FAQ feature lists, workflow stages) used when Supabase is unavailable.
 - `supabase` contains SQL migrations for durable tables (access requests, marketing content revisions, exports, embeddings, onboarding) that mirror the runtime expectations in `src/lib/db`.
 - `docs` captures design notes and runbooks; this file anchors the architecture map.
-- Root config: `package.json` defines dev/test scripts, `next.config.ts` carries App Router settings, and Tailwind/TypeScript configs live alongside the project root.
+- Root config: `package.json` defines dev/test scripts, `next.config.mjs` carries App Router settings, and Tailwind/TypeScript configs live alongside the project root.
 
 ## Marketing content delivery
 - The home page fetches landing and FAQ payloads via `fetchLandingContent`/`fetchFaqContent` before rendering the marketing experience. On fetch errors, the UI surfaces a fallback notice alongside locally cached content.
