@@ -51,6 +51,11 @@ Every edit is stored in Supabase with author metadata so you can audit marketing
 - `npm run build` — create a production build
 - `npm run start` — run the production build locally
 - `npm run lint` — check the codebase with ESLint
+- `npm run type-check` — run the strict TypeScript project
+- `npm run check` — convenience script that runs linting, type-checking, and unit tests (mirrors CI)
+
+Every pull request runs the same checks via [`.github/workflows/ci.yml`](.github/workflows/ci.yml); mark those jobs as required
+before merging to keep `main` healthy.
 
 ## Tech Stack
 
@@ -71,4 +76,6 @@ src/
 
 This prototype focuses on communicating the system vision. Upcoming work will layer in live voice capture, script editing surfaces, reference asset management, and backend orchestration described in the blueprint.
 
-See [`docs/gap-remediation-plan.md`](docs/gap-remediation-plan.md) for the detailed remediation plan and sequencing.
+See [`docs/gap-remediation-plan.md`](docs/gap-remediation-plan.md) for the detailed remediation plan and sequencing. For
+observability configuration details (Grafana/DataDog, OTLP endpoints, emitted metrics), read
+[`docs/observability.md`](docs/observability.md).

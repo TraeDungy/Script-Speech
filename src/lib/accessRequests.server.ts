@@ -7,6 +7,7 @@ import {
   type PostgrestError,
   type SupabaseClient,
 } from "@supabase/supabase-js";
+import { recordFlowMetric, withSpan } from "@/lib/observability";
 
 const SUPABASE_URL = process.env.SUPABASE_URL?.trim();
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
@@ -342,40 +343,82 @@ export async function createAccessRequest({
   const normalizedMessage = normalizeValue(message);
   const normalizedMetadata = sanitizeMetadata(metadata);
   const normalizedClient = sanitizeClientContext(client);
+  const storage = SUPABASE_URL && resolveSupabaseKey() ? "supabase" : "file";
 
-  const now = new Date();
-  const rateLimitMinutes = getRateLimitMinutes();
-  const windowStart = new Date(now.getTime() - rateLimitMinutes * 60 * 1000);
+  return withSpan(
+    {
+      name: "access-requests.create",
+      attributes: {
+        storage,
+        hasMetadata: Boolean(normalizedMetadata),
+      },
+    },
+    async (span) => {
+      const now = new Date();
+      const rateLimitMinutes = getRateLimitMinutes();
+      const windowStart = new Date(now.getTime() - rateLimitMinutes * 60 * 1000);
 
-  const persistence = getPersistence();
+      const persistence = getPersistence();
 
-  const hasRecentSubmission = await persistence.hasRecentSubmission(
-    normalizedEmail,
-    windowStart,
+      const hasRecentSubmission = await persistence.hasRecentSubmission(
+        normalizedEmail,
+        windowStart,
+      );
+
+      if (hasRecentSubmission) {
+        recordFlowMetric("access_requests_total", "Count of inbound access requests", {
+          result: "rate_limited",
+          storage,
+        });
+        throw new AccessRequestError(
+          `We received a recent request from this email. Please try again in ${rateLimitMinutes} minutes.`,
+          429,
+        );
+      }
+
+      const record: AccessRequestRecord = {
+        id: randomUUID(),
+        email: normalizedEmail,
+        message: normalizedMessage,
+        metadata: normalizedMetadata,
+        client: normalizedClient,
+        submittedAt: now.toISOString(),
+      };
+
+      span.setAttribute("access.email_domain", normalizedEmail.split("@")[1] ?? "unknown");
+      span.setAttribute("access.metadata_keys", normalizedMetadata ? Object.keys(normalizedMetadata).length : 0);
+
+      try {
+        await persistence.create(record);
+        recordFlowMetric("access_requests_total", "Count of inbound access requests", {
+          result: "accepted",
+          storage,
+        });
+      } catch (error) {
+        recordFlowMetric("access_requests_total", "Count of inbound access requests", {
+          result: "error",
+          storage,
+        });
+        throw error;
+      }
+
+      return record;
+    },
   );
-
-  if (hasRecentSubmission) {
-    throw new AccessRequestError(
-      `We received a recent request from this email. Please try again in ${rateLimitMinutes} minutes.`,
-      429,
-    );
-  }
-
-  const record: AccessRequestRecord = {
-    id: randomUUID(),
-    email: normalizedEmail,
-    message: normalizedMessage,
-    metadata: normalizedMetadata,
-    client: normalizedClient,
-    submittedAt: now.toISOString(),
-  };
-
-  await persistence.create(record);
-
-  return record;
 }
 
 export async function listAccessRequests(): Promise<AccessRequestRecord[]> {
-  const persistence = getPersistence();
-  return persistence.list();
+  const storage = SUPABASE_URL && resolveSupabaseKey() ? "supabase" : "file";
+  return withSpan(
+    { name: "access-requests.list", attributes: { storage } },
+    async (span) => {
+      const persistence = getPersistence();
+      const requests = await persistence.list();
+      span.setAttribute("access.requests.count", requests.length);
+      recordFlowMetric("access_request_reads_total", "Count of access request reads", {
+        storage,
+      });
+      return requests;
+    },
+  );
 }

@@ -7,6 +7,7 @@ import {
   fetchExportJobRecord,
   updateExportJobRecord,
 } from "@/lib/db/exportJobs";
+import { logStructuredEvent, recordFlowMetric, withSpan } from "@/lib/observability";
 import type { ExportFormat, ExportJob, ScriptDoc } from "./types";
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
 import {
@@ -68,10 +69,23 @@ class LocalExportQueue {
       });
     }, 25);
 
-    return job;
+        setTimeout(() => {
+          void this.process(job.id).catch((error) => {
+            logStructuredEvent({
+              level: "error",
+              message: "export.job.failed",
+              error,
+              context: { jobId: job.id },
+            });
+          });
+        }, 10);
+
+        return job;
+      },
+    );
   }
 
-  async getJob(jobId: string): Promise<ExportJob | null> {
+  getJob(jobId: string): Promise<ExportJob | null> {
     return fetchExportJobRecord(jobId);
   }
 
@@ -108,6 +122,10 @@ class LocalExportQueue {
         storage_path: artifact.storagePath ?? null,
       });
     } catch (error) {
+      recordFlowMetric("export_jobs_total", "Count of export jobs", {
+        stage: "failed",
+        format: payload.format,
+      });
       await updateExportJobRecord(jobId, {
         status: "failed",
         error: error instanceof Error ? error.message : "Export failed",
@@ -349,39 +367,8 @@ function buildFileName(projectId: string, extension: string): string {
   return `${projectId}-${timestamp}.${extension}`;
 }
 
-async function renderExport(payload: ExportQueuePayload): Promise<RenderedExportResult> {
-  switch (payload.format) {
-    case "fountain":
-      return {
-        buffer: Buffer.from(scriptDocToFountain(payload.scriptDoc), "utf8"),
-        extension: "fountain",
-        mime: "text/plain;charset=utf-8",
-        notes: "Generated from script document",
-      };
-    case "fdx":
-      return {
-        buffer: Buffer.from(scriptDocToFdx(payload.scriptDoc), "utf8"),
-        extension: "fdx",
-        mime: "application/xml",
-        notes: "Simplified Final Draft XML",
-      };
-    case "docx":
-      return {
-        buffer: scriptDocToDocx(payload.scriptDoc),
-        extension: "docx",
-        mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        notes: "Minimal WordprocessingML payload",
-      };
-    case "pdf":
-      return {
-        buffer: scriptDocToPdf(payload.scriptDoc),
-        extension: "pdf",
-        mime: "application/pdf",
-        notes: "Stub PDF content for preview flows",
-      };
-    default:
-      throw new Error(`Unsupported export format: ${payload.format}`);
-  }
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 class LocalExportQueue {
