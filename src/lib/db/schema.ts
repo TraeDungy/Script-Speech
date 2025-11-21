@@ -22,6 +22,15 @@ export interface ScriptDocRow extends Omit<GeneratedScriptDocRow, "doc"> {
   doc: ScriptDoc;
 }
 
+export interface DraftVersionRow {
+  id: string;
+  project_id: string;
+  doc: ScriptDoc;
+  summary: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
 export interface BeatRow {
   id: string;
   project_id: string;
@@ -110,6 +119,16 @@ export interface ExportJobRow
   extends Omit<GeneratedExportJobRow, "script_doc" | "result"> {
   script_doc: ScriptDoc;
   result: ExportJobRowResult | null;
+}
+
+export interface ExportDownloadTokenRow {
+  id: string;
+  job_id: string;
+  token: string;
+  signed_url: string;
+  expires_at: string;
+  created_by: string | null;
+  created_at: string;
 }
 
 export type MarketingContentStatus = "draft" | "published" | "archived";

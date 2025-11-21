@@ -2,14 +2,17 @@
 
 Voice-first scriptwriting assistant project. The repository now contains a Next.js (App Router) prototype for **Voice Script Studio**, aligning with the [development blueprint](docs/voice-script-studio-development.md).
 
-## Getting Started
+## Quickstart
 
-```bash
-npm install
-npm run dev
-```
+1. Install dependencies and start the dev server:
 
-Visit `http://localhost:3000` to explore the voice-first landing experience.
+   ```bash
+   npm install
+   npm run dev
+   ```
+
+2. Visit `http://localhost:3000` to explore the voice-first landing experience.
+3. Wire up optional backends (Supabase, Upstash Redis, OpenAI) using the guidance below, then consult [`docs/architecture.md`](docs/architecture.md) for a map of entry points, data flow, and runtime services.
 
 ### Supabase configuration (optional but recommended)
 

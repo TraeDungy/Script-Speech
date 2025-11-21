@@ -124,7 +124,7 @@ describe("/api/assets", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       asset: { id: "asset-1", projectId: "p1", url: "https://storage/asset-1" },
-      upload: { uploadUrl: "signed" },
+      upload: { uploadUrl: "signed", assetUrl: "https://storage/asset-1" },
     });
     expect(mockUpdateReferenceAsset).toHaveBeenCalledWith("asset-1", {
       url: "https://storage/asset-1",
@@ -190,6 +190,7 @@ describe("/api/assets", () => {
   });
 
   it("updates asset metadata", async () => {
+    mockGetReferenceAsset.mockResolvedValueOnce({ id: "asset-3", projectId: null });
     mockUpdateReferenceAsset.mockResolvedValueOnce({ id: "asset-3", name: "Updated" });
 
     const request = new NextRequest("http://localhost/api/assets", {

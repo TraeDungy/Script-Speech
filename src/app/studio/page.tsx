@@ -8,6 +8,7 @@ import type { ScriptDoc } from "@/lib/scriptDoc";
 import type { StudioSessionRecord, StudioSlotPayload } from "@/lib/db/studioSessions";
 import { initializeStudioSession } from "./actions";
 import { StudioOnboardingPanel } from "./onboarding-panel";
+import { OnboardingWizard } from "./onboarding-wizard";
 
 import {
   ScriptDocFormatRecommendation,
@@ -963,6 +964,8 @@ export default function StudioPage() {
         </Link>
       </header>
 
+      <OnboardingWizard />
+
       <StudioOnboardingPanel
         session={session}
         onSessionUpdated={setSession}
@@ -1027,7 +1030,7 @@ export default function StudioPage() {
               ))}
             </ul>
           </div>
-          <ExportQueuePanel />
+          <ExportQueuePanel projectId={DEFAULT_PROJECT_ID} />
         </aside>
       </section>
     </main>

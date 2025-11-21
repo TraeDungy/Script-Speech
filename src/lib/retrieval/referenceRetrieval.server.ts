@@ -3,7 +3,8 @@ import { buildScriptDocChunks, type ScriptDocChunk } from "@/lib/retrieval/chunk
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
 import type { EntityAsset, ReferenceAsset } from "@/lib/types/assets";
 
-const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-large";
+// Keep the default embedding dimension in sync with the pgvector column size (1536)
+const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL ?? "text-embedding-3-small";
 const EMBEDDING_URL = "https://api.openai.com/v1/embeddings";
 
 export interface RetrievalMatch extends ScriptDocChunk {

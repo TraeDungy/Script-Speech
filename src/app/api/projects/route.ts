@@ -1,11 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import {
-  createProject,
-  listProjects,
-  type CreateProjectInput,
-  type ListProjectsOptions,
-} from "@/lib/db/projects";
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
 import { logAuditEvent } from "@/lib/auditLog";
 import {
@@ -15,57 +9,55 @@ import {
   recordApiRequest,
   withSpan,
 } from "@/lib/observability";
+import {
+  createProjectWithDoc,
+  listProjectsForUser,
+  type ScriptDocPayload,
+} from "@/lib/projectsApi.server";
 
 export async function GET(request: NextRequest) {
   recordApiRequest("projects", "GET");
 
   try {
-    return await withSpan(
-      { name: "api.projects.get", attributes: { route: "/api/projects" } },
-      async (span) => {
-        const { user } = await requireServerAuthSession();
-        const { searchParams } = request.nextUrl;
-        const limit = Number(searchParams.get("limit"));
-        const cursor = searchParams.get("cursor") ?? undefined;
-        const search = searchParams.get("search") ?? undefined;
-        const status = searchParams.get("status") ?? undefined;
+    return await withSpan({ name: "api.projects.get" }, async () => {
+      const { user } = await requireServerAuthSession();
+      const limitParam = request.nextUrl.searchParams.get("limit");
+      const limit = limitParam === null ? undefined : Number.parseInt(limitParam, 10);
 
-        const options: ListProjectsOptions = {
-          limit: Number.isFinite(limit) ? limit : undefined,
-          cursor,
-          search,
-          status: status as ListProjectsOptions["status"],
-          userId: user.id,
-        };
+      if (limitParam !== null && (!Number.isFinite(limit) || limit <= 0)) {
+        recordApiError("projects", "GET", 400);
+        return NextResponse.json({ error: "Invalid limit parameter" }, { status: 400 });
+      }
+      const projects = await listProjectsForUser(user.id, { limit });
 
-        span.setAttribute("project.query", {
-          hasSearch: Boolean(search),
-          status: options.status ?? "all",
-        });
+      logStructuredEvent({
+        level: "info",
+        message: "projects.listed",
+        context: { userId: user.id, total: projects.length },
+      });
 
-        const result = await listProjects(options);
-        logStructuredEvent({
-          level: "info",
-          message: "projects.listed",
-          context: { userId: user.id, total: result.total },
-        });
-        return NextResponse.json(result);
-      },
-    );
+      return NextResponse.json({ projects });
+    });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       recordApiError("projects", "GET", 401);
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
     recordApiError("projects", "GET", 500);
     await captureApiException(error, { route: "projects", method: "GET", status: 500 });
-    logStructuredEvent({ level: "error", message: "projects.list.failed", error });
     return NextResponse.json({ error: "Unable to load projects" }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
-  let body: Partial<CreateProjectInput>;
+  let body: {
+    title?: string;
+    scriptType?: string;
+    metadata?: Record<string, unknown>;
+    scriptDoc?: ScriptDocPayload;
+  };
+
   try {
     body = await request.json();
   } catch {
@@ -75,53 +67,42 @@ export async function POST(request: NextRequest) {
 
   if (!body?.title || !body?.scriptType) {
     recordApiError("projects", "POST", 400);
-    return NextResponse.json(
-      { error: "Both title and scriptType are required" },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "Both title and scriptType are required" }, { status: 400 });
   }
 
   recordApiRequest("projects", "POST");
 
   try {
-    return await withSpan(
-      { name: "api.projects.post", attributes: { route: "/api/projects" } },
-      async (span) => {
-        const { user } = await requireServerAuthSession();
+    const { user } = await requireServerAuthSession();
 
-        const project = await createProject({
-          title: body.title,
-          scriptType: body.scriptType,
-          genre: body.genre ?? null,
-          logline: body.logline ?? null,
-          status: body.status,
-          targetLength: body.targetLength,
-          tags: body.tags ?? [],
-          ownerId: user.id,
-        });
+    const result = await createProjectWithDoc(user.id, {
+      title: body.title,
+      scriptType: body.scriptType,
+      metadata: body.metadata ?? {},
+      scriptDoc: body.scriptDoc,
+    });
 
-        await logAuditEvent({
-          action: "project.create",
-          userId: user.id,
-          projectId: project.id,
-          details: { title: project.title, scriptType: project.scriptType },
-          severity: "high",
-        });
+    await logAuditEvent({
+      action: "project.create",
+      userId: user.id,
+      projectId: result.project.id,
+      details: { title: result.project.title, scriptType: result.project.scriptType },
+      severity: "high",
+    });
 
-        span.setAttribute("project.id", project.id);
-        logStructuredEvent({
-          level: "info",
-          message: "project.created",
-          context: { projectId: project.id, ownerId: user.id },
-        });
-        return NextResponse.json({ project }, { status: 201 });
-      },
-    );
+    logStructuredEvent({
+      level: "info",
+      message: "project.created",
+      context: { projectId: result.project.id, ownerId: user.id },
+    });
+
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       recordApiError("projects", "POST", 401);
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
     recordApiError("projects", "POST", 500);
     await captureApiException(error, { route: "projects", method: "POST", status: 500 });
     logStructuredEvent({ level: "error", message: "project.create.failed", error });

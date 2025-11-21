@@ -8,7 +8,13 @@ import type {
   EntityAssetTargetType,
   ReferenceAsset,
 } from "@/lib/types/assets";
-import type { ExportJobRow, ProjectRow, ScriptDocRow } from "./schema";
+import type {
+  DraftVersionRow,
+  ExportDownloadTokenRow,
+  ExportJobRow,
+  ProjectRow,
+  ScriptDocRow,
+} from "./schema";
 
 type MockProjectRole = "owner" | "editor" | "member" | "viewer";
 
@@ -446,7 +452,9 @@ const mockEntityAssets: EntityAsset[] = [
   },
 ];
 
+const draftVersions = new Map<string, DraftVersionRow>();
 const exportJobs = new Map<string, ExportJobRow>();
+const exportDownloadTokens: ExportDownloadTokenRow[] = [];
 
 function cloneScriptDoc(): ScriptDoc {
   return typeof structuredClone === "function"
@@ -650,6 +658,28 @@ export function listMockExportJobs(): ExportJobRow[] {
   return Array.from(exportJobs.values()).map((job) => ({ ...job }));
 }
 
+export function createMockDraftVersion(payload: {
+  projectId: string;
+  doc: ScriptDoc;
+  summary?: string | null;
+  createdBy?: string | null;
+}): DraftVersionRow {
+  const row: DraftVersionRow = {
+    id: randomUUID(),
+    project_id: payload.projectId,
+    doc: payload.doc,
+    summary: payload.summary ?? null,
+    created_by: payload.createdBy ?? null,
+    created_at: new Date().toISOString(),
+  };
+  draftVersions.set(row.id, row);
+  return { ...row };
+}
+
+export function insertMockExportDownloadToken(row: ExportDownloadTokenRow): void {
+  exportDownloadTokens.push({ ...row });
+}
+
 export function getMockExportJob(jobId: string): ExportJobRow | undefined {
   const job = exportJobs.get(jobId);
   return job ? { ...job } : undefined;
@@ -664,18 +694,23 @@ export function createMockExportJob(payload: {
   format: ExportJobRow["format"];
   scriptDoc: ScriptDoc;
   deliverToEmail?: string | null;
+  draftVersionId?: string | null;
 }): ExportJobRow {
   const id = randomUUID();
   const now = new Date().toISOString();
   const job: ExportJobRow = {
     id,
     project_id: payload.projectId,
+    draft_version_id: payload.draftVersionId ?? null,
     format: payload.format,
     status: "queued",
     deliver_to_email: payload.deliverToEmail ?? null,
     script_doc: payload.scriptDoc,
     result: null,
     error: null,
+    storage_driver: null,
+    storage_path: null,
+    storage_bucket: null,
     created_at: now,
     updated_at: now,
   };
