@@ -8,6 +8,7 @@ import type { ScriptDoc } from "@/lib/scriptDoc";
 import type { StudioSessionRecord, StudioSlotPayload } from "@/lib/db/studioSessions";
 import { initializeStudioSession } from "./actions";
 import { StudioOnboardingPanel } from "./onboarding-panel";
+import { OnboardingWizard } from "./onboarding-wizard";
 
 import {
   ScriptDocFormatRecommendation,
@@ -962,6 +963,8 @@ export default function StudioPage() {
           Return to the landing page ↗
         </Link>
       </header>
+
+      <OnboardingWizard />
 
       <StudioOnboardingPanel
         session={session}

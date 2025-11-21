@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GET, POST } from "./route";
 
-const dbModule = vi.hoisted(() => ({
-  listProjects: vi.fn(),
-  createProject: vi.fn(),
+const projectsApiModule = vi.hoisted(() => ({
+  listProjectsForUser: vi.fn(),
+  createProjectWithDoc: vi.fn(),
 }));
 
 const authModule = vi.hoisted(() => ({
@@ -22,17 +22,16 @@ const observabilityModule = vi.hoisted(() => ({
   recordApiError: vi.fn(),
   captureApiException: vi.fn(),
   logStructuredEvent: vi.fn(),
-  withSpan: async (_options: unknown, fn: (span: { setAttribute: () => void }) => Promise<unknown>) =>
-    fn({ setAttribute: () => {} }),
+  withSpan: async (_options: unknown, fn: () => Promise<unknown>) => fn(),
 }));
 
-vi.mock("@/lib/db/projects", () => dbModule);
+vi.mock("@/lib/projectsApi.server", () => projectsApiModule);
 vi.mock("@/lib/auth/server", () => authModule);
 vi.mock("@/lib/auditLog", () => auditModule);
 vi.mock("@/lib/observability", () => observabilityModule);
 
-const mockListProjects = dbModule.listProjects;
-const mockCreateProject = dbModule.createProject;
+const mockListProjects = projectsApiModule.listProjectsForUser;
+const mockCreateProjectWithDoc = projectsApiModule.createProjectWithDoc;
 const mockRequireServerAuthSession = authModule.requireServerAuthSession;
 const mockLogAuditEvent = auditModule.logAuditEvent;
 const mockRecordApiError = observabilityModule.recordApiError;
@@ -45,15 +44,13 @@ beforeEach(() => {
 
 describe("/api/projects", () => {
   it("lists projects for the authenticated user", async () => {
-    mockListProjects.mockResolvedValueOnce({ projects: [], total: 0, hasMore: false });
-    const request = new NextRequest("http://localhost/api/projects?limit=10&status=draft");
+    mockListProjects.mockResolvedValueOnce([]);
+    const request = new NextRequest("http://localhost/api/projects?limit=10");
 
     const response = await GET(request);
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ projects: [], total: 0, hasMore: false });
-    expect(mockListProjects).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "user-1", limit: 10, status: "draft" }),
-    );
+    await expect(response.json()).resolves.toEqual({ projects: [] });
+    expect(mockListProjects).toHaveBeenCalledWith("user-1", { limit: 10 });
   });
 
   it("returns 401 when authentication fails", async () => {
@@ -76,24 +73,27 @@ describe("/api/projects", () => {
     await expect(response.json()).resolves.toEqual({ error: "Unable to load projects" });
   });
 
-  it("creates a project for the authenticated user", async () => {
-    const project = { id: "p1", title: "Pilot", scriptType: "feature" };
-    mockCreateProject.mockResolvedValueOnce(project);
+  it("creates a project and script doc for the authenticated user", async () => {
+    const result = { project: { id: "p1", title: "Pilot", scriptType: "feature", metadata: {}, updatedAt: "" }, scriptDoc: null };
+    mockCreateProjectWithDoc.mockResolvedValueOnce(result);
 
     const request = new NextRequest("http://localhost/api/projects", {
       method: "POST",
-      body: JSON.stringify({ title: project.title, scriptType: project.scriptType }),
+      body: JSON.stringify({ title: result.project.title, scriptType: result.project.scriptType }),
       headers: { "content-type": "application/json" },
     });
 
     const response = await POST(request);
     expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toEqual({ project });
-    expect(mockCreateProject).toHaveBeenCalledWith(
-      expect.objectContaining({ title: project.title, ownerId: "user-1" }),
-    );
+    await expect(response.json()).resolves.toEqual(result);
+    expect(mockCreateProjectWithDoc).toHaveBeenCalledWith("user-1", {
+      title: result.project.title,
+      scriptType: result.project.scriptType,
+      metadata: {},
+      scriptDoc: undefined,
+    });
     expect(mockLogAuditEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "project.create", projectId: project.id }),
+      expect.objectContaining({ action: "project.create", projectId: result.project.id }),
     );
   });
 
@@ -102,6 +102,18 @@ describe("/api/projects", () => {
     const response = await POST(request);
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: "Invalid JSON payload" });
+  });
+
+  it("rejects missing required fields", async () => {
+    const request = new NextRequest("http://localhost/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ title: "Doc" }),
+      headers: { "content-type": "application/json" },
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Both title and scriptType are required" });
   });
 
   it("returns 401 when project creation lacks auth", async () => {
