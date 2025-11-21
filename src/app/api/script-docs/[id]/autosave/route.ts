@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
-import { docSelect, loadScriptDoc } from "./utils";
+import { getSupabaseServiceClient } from "@/lib/supabase.server";
+import { docSelect, loadScriptDoc } from "../utils";
 
-type AutosavePayload = {
+interface AutosavePayload {
   doc?: unknown;
   cursorState?: unknown;
   updatedAt?: string;
-};
+}
 
-export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+export async function POST(request: Request, { params }: { params: { id: string } }) {
   let body: AutosavePayload;
   try {
     body = await request.json();
@@ -24,16 +25,18 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   try {
     const { user } = await requireServerAuthSession();
     const supabase = getSupabaseServiceClient();
+
     if (!supabase) {
       return NextResponse.json({ error: "Supabase unavailable" }, { status: 503 });
     }
 
     const existing = await loadScriptDoc(params.id, user.id);
+
     if (!existing) {
       return NextResponse.json({ error: "ScriptDoc not found" }, { status: 404 });
     }
 
-    if (body.updatedAt && new Date(existing.updated_at).getTime() > new Date(body.updatedAt).getTime()) {
+    if (body.updatedAt && new Date(existing.updated_at) > new Date(body.updatedAt)) {
       return NextResponse.json(
         { error: "conflict", scriptDoc: existing.doc, updatedAt: existing.updated_at },
         { status: 409 },
@@ -43,7 +46,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
     const metadata = {
       ...(existing.metadata as Record<string, unknown>),
       cursorState: body.cursorState ?? (existing.metadata as Record<string, unknown> | null)?.cursorState,
-    };
+    } satisfies Record<string, unknown>;
 
     const { data, error } = await supabase
       .from("script_docs")
@@ -51,7 +54,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
         doc: body.doc,
         metadata,
         updated_at: new Date().toISOString(),
-        record_type: existing.record_type ?? "autosave",
+        record_type: "autosave",
         user_id: existing.user_id ?? user.id,
       })
       .eq("id", params.id)
@@ -60,7 +63,7 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       .maybeSingle();
 
     if (error) {
-      console.error("Failed to persist autosave", error);
+      console.error("Failed to persist script doc autosave", error);
       return NextResponse.json({ error: "Unable to save ScriptDoc" }, { status: 500 });
     }
 
@@ -77,6 +80,12 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 export async function GET(_request: Request, { params }: { params: { id: string } }) {
   try {
     const { user } = await requireServerAuthSession();
+    const supabase = getSupabaseServiceClient();
+
+    if (!supabase) {
+      return NextResponse.json({ error: "Supabase unavailable" }, { status: 503 });
+    }
+
     const record = await loadScriptDoc(params.id, user.id);
 
     if (!record) {
@@ -92,8 +101,7 @@ export async function GET(_request: Request, { params }: { params: { id: string 
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    console.error("Failed to load ScriptDoc", error);
+    console.error("Failed to load ScriptDoc autosave", error);
     return NextResponse.json({ error: "Unable to load ScriptDoc" }, { status: 500 });
   }
 }
-

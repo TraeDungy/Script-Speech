@@ -27,6 +27,7 @@ function mapExportJob(row: ExportJobRow): ExportJob {
 
 export async function createQueuedExportJob(params: {
   userId: string;
+  projectId?: string | null;
   scriptDocId?: string | null;
   scriptDoc: unknown;
   format: ExportJob["format"];
@@ -43,6 +44,7 @@ export async function createQueuedExportJob(params: {
     .insert({
       id: randomUUID(),
       user_id: params.userId,
+      project_id: params.projectId ?? null,
       script_doc_id: params.scriptDocId ?? null,
       script_doc: params.scriptDoc ?? {},
       status: "queued",
@@ -84,6 +86,29 @@ export async function getExportJobForUser(jobId: string, userId: string): Promis
   }
 
   return data ? mapExportJob(data) : null;
+}
+
+export async function listExportJobsForUser(
+  userId: string,
+  { limit = 25 }: { limit?: number } = {},
+): Promise<ExportJob[]> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) {
+    throw new Error("Supabase client unavailable");
+  }
+
+  const { data, error } = await supabase
+    .from("export_jobs")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapExportJob);
 }
 
 export async function updateExportJobForUser(
