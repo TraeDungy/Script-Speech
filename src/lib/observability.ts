@@ -1,5 +1,13 @@
 import { performance } from "node:perf_hooks";
 
+import {
+  SpanStatusCode,
+  context as otelContext,
+  metrics,
+  trace,
+  type Span,
+} from "@opentelemetry/api";
+
 interface SpanOptions {
   name: string;
   attributes?: Record<string, unknown>;
@@ -71,6 +79,14 @@ export function logStructuredEvent(event: StructuredLogEvent): void {
   method("[observability]", payload);
 }
 
+export function createStructuredLogger(context?: Record<string, unknown>) {
+  return (event: StructuredLogEvent) =>
+    logStructuredEvent({
+      ...event,
+      context: { ...context, ...event.context },
+    });
+}
+
 function getCounters(): Map<string, Counter> {
   if (!telemetryState.__scriptSpeechCounters) {
     telemetryState.__scriptSpeechCounters = new Map();
@@ -88,7 +104,7 @@ function createCounter(name: string, description: string): Counter {
   return counter;
 }
 
-function formatAttributes(attributes: ApiMetricAttributes): string {
+function formatAttributes(attributes: Record<string, unknown>): string {
   const entries = Object.entries(attributes)
     .filter(([, value]) => value !== undefined && value !== null)
     .map(([key, value]) => `${key}=${String(value)}`)
@@ -96,11 +112,19 @@ function formatAttributes(attributes: ApiMetricAttributes): string {
   return entries;
 }
 
-function incrementCounter(name: string, description: string, attributes: ApiMetricAttributes) {
+function incrementCounter(name: string, description: string, attributes: Record<string, unknown>) {
   const counter = createCounter(name, description);
   const key = formatAttributes(attributes);
   const current = counter.values.get(key) ?? 0;
   counter.values.set(key, current + 1);
+
+  try {
+    const meter = metrics.getMeter("script-speech");
+    const metric = meter.createCounter(name, { description });
+    metric.add(1, attributes as Record<string, string>);
+  } catch (error) {
+    console.warn("[observability] Unable to emit metric", error);
+  }
 }
 
 export function recordApiRequest(route: string, method: string): void {
@@ -109,6 +133,43 @@ export function recordApiRequest(route: string, method: string): void {
 
 export function recordApiError(route: string, method: string, status: number): void {
   incrementCounter("api_errors_total", "Count of API route errors", { route, method, status });
+}
+
+export function recordBusinessEvent(
+  name: string,
+  description: string,
+  attributes: Record<string, string | number | boolean | undefined>,
+): void {
+  const filteredEntries = Object.fromEntries(
+    Object.entries(attributes).filter(([, value]) => value !== undefined),
+  ) as Record<string, string | number | boolean>;
+
+  const normalizedAttributes = Object.fromEntries(
+    Object.entries(filteredEntries).map(([key, value]) => [key, String(value)]),
+  ) as Record<string, string>;
+
+  const counter = createCounter(name, description);
+  const key = formatAttributes(normalizedAttributes as ApiMetricAttributes);
+  const current = counter.values.get(key) ?? 0;
+  counter.values.set(key, current + 1);
+
+  try {
+    const meter = metrics.getMeter("script-speech");
+    const metric = meter.createCounter(name, { description });
+    metric.add(1, normalizedAttributes);
+  } catch (error) {
+    console.warn("[observability] Unable to emit business metric", error);
+  }
+}
+
+function startOtelSpan(name: string, attributes?: Record<string, unknown>): Span | null {
+  try {
+    const tracer = trace.getTracer("script-speech");
+    return tracer.startSpan(name, { attributes });
+  } catch (error) {
+    console.warn("[observability] Unable to start OpenTelemetry span", error);
+    return null;
+  }
 }
 
 function startSpanInternal(name: string, attributes?: Record<string, unknown>): SpanRecord {
@@ -206,19 +267,28 @@ export async function withSpan<T>(
 ): Promise<T> {
   const span = startSpanInternal(options.name, options.attributes);
   const activeAttributes = span.attributes ?? {};
+  const otelSpan = startOtelSpan(options.name, options.attributes);
   const apiSpan = {
     setAttribute(key: string, value: unknown) {
       activeAttributes[key] = value;
+      otelSpan?.setAttribute(key as string, value as never);
     },
   };
 
   try {
-    const result = await run(apiSpan);
+    const result = await (otelSpan
+      ? otelContext.with(trace.setSpan(otelContext.active(), otelSpan), () => run(apiSpan))
+      : run(apiSpan));
     endSpan(span, { status: "ok" });
+    otelSpan?.setStatus({ code: SpanStatusCode.OK });
     return result;
   } catch (error) {
     endSpan(span, { status: "error", error });
+    otelSpan?.recordException(error as Error);
+    otelSpan?.setStatus({ code: SpanStatusCode.ERROR });
     throw error;
+  } finally {
+    otelSpan?.end();
   }
 }
 

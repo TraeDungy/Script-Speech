@@ -6,6 +6,9 @@ import { ensureProjectMembership } from "@/lib/authz/projects.server";
 import { createQueuedExportJob, getExportJobForUser, listExportJobsForUser } from "@/lib/exports/jobs";
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
 import { updateExportJobForUser } from "@/lib/exports/jobs";
+import { recordBusinessEvent, withSpan } from "@/lib/observability";
+
+const logSpy = vi.fn();
 
 vi.mock("@/lib/auth/server", () => ({
   requireServerAuthSession: vi.fn(),
@@ -28,6 +31,20 @@ vi.mock("@/lib/exports/jobs", () => ({
   updateExportJobForUser: vi.fn(),
 }));
 
+vi.mock("@/lib/observability", () => ({
+  recordBusinessEvent: vi.fn(),
+  withSpan: vi.fn(
+    (options: unknown, callback: (span: { setAttribute: () => void }, ...args: unknown[]) => Promise<Response>, ...args: unknown[]) =>
+      callback({ setAttribute: () => {} }, ...args),
+  ),
+}));
+
+vi.mock("@/lib/requestContext", () => ({
+  REQUEST_ID_HEADER: "x-request-id",
+  createRequestLogger: () => logSpy,
+  getRequestIdFromHeaders: vi.fn(() => "export-request-id"),
+}));
+
 describe("exports API", () => {
   const supabaseMock = {
     from: vi.fn(() => ({
@@ -45,6 +62,7 @@ describe("exports API", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    logSpy.mockClear();
     (requireServerAuthSession as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       user: { id: "user-1" },
     });
@@ -65,6 +83,7 @@ describe("exports API", () => {
 
     expect(response.status).toBe(503);
     expect(payload.error).toContain("Supabase client");
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   it("queues an export job and returns the job payload", async () => {
@@ -96,6 +115,17 @@ describe("exports API", () => {
     expect(createQueuedExportJob).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "user-1", format: "pdf" }),
     );
+    expect(recordBusinessEvent).toHaveBeenCalledWith(
+      "export_jobs_enqueued_total",
+      "Queued export jobs",
+      expect.objectContaining({ format: "pdf" }),
+    );
+    expect(withSpan).toHaveBeenCalledWith(
+      expect.objectContaining({ attributes: expect.objectContaining({ requestId: "export-request-id" }) }),
+      expect.any(Function),
+    );
+    expect(response.headers.get("x-request-id")).toBe("export-request-id");
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   it("returns a users export job when an id is provided", async () => {

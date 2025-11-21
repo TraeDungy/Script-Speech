@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getUserFromRequest } from "@/lib/auth/server";
 import { enforceRateLimit } from "@/lib/rateLimit";
+import { ensureRequestIdHeaders, REQUEST_ID_HEADER } from "@/lib/requestContext";
 
 interface RateLimitRule {
   matcher: RegExp;
@@ -54,12 +55,16 @@ async function resolveRateLimitKey(request: NextRequest): Promise<string> {
 }
 
 export async function middleware(request: NextRequest) {
+  const { requestId, headers: requestHeaders } = ensureRequestIdHeaders(request.headers);
+
   const rule = RATE_LIMIT_RULES.find(
     (entry) => entry.matcher.test(request.nextUrl.pathname) && entry.methods.includes(request.method),
   );
 
   if (!rule) {
-    return NextResponse.next();
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set(REQUEST_ID_HEADER, requestId);
+    return response;
   }
 
   const key = await resolveRateLimitKey(request);
@@ -71,13 +76,15 @@ export async function middleware(request: NextRequest) {
   });
 
   if (rate.allowed) {
-    return NextResponse.next();
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set(REQUEST_ID_HEADER, requestId);
+    return response;
   }
 
   const retryAfter = Math.max(1, Math.ceil((rate.resetAt - Date.now()) / 1000)).toString();
   return NextResponse.json(
     { error: "Rate limit exceeded" },
-    { status: 429, headers: { "Retry-After": retryAfter } },
+    { status: 429, headers: { "Retry-After": retryAfter, [REQUEST_ID_HEADER]: requestId } },
   );
 }
 
