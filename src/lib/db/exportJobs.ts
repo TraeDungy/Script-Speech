@@ -15,6 +15,7 @@ function mapExportJobRow(row: ExportJobRow): ExportJob {
   return {
     id: row.id,
     projectId: row.project_id,
+    userId: row.user_id ?? undefined,
     draftVersionId: row.draft_version_id ?? undefined,
     format: row.format,
     status: row.status,
@@ -23,6 +24,7 @@ function mapExportJobRow(row: ExportJobRow): ExportJob {
     deliverToEmail: row.deliver_to_email ?? undefined,
     result: row.result ?? undefined,
     error: row.error ?? undefined,
+    downloadPath: row.storage_path ?? undefined,
   };
 }
 
@@ -31,6 +33,7 @@ export async function createExportJobRecord(payload: {
   format: ExportFormat;
   scriptDoc: ScriptDoc;
   deliverToEmail?: string;
+  userId?: string;
   draftVersionId?: string | null;
 }): Promise<ExportJob> {
   if (!isSupabaseConfigured()) {
@@ -45,6 +48,7 @@ export async function createExportJobRecord(payload: {
     id,
     project_id: payload.projectId,
     draft_version_id: payload.draftVersionId ?? null,
+    user_id: payload.userId ?? null,
     format: payload.format,
     status: "queued",
     deliver_to_email: payload.deliverToEmail ?? null,
@@ -150,6 +154,36 @@ export async function listExportJobsForProject(
     .from<ExportJobRow>("export_jobs")
     .select("*")
     .eq("project_id", projectId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error("Failed to list export jobs", error);
+    throw error;
+  }
+
+  return (data ?? []).map(mapExportJobRow);
+}
+
+export async function listExportJobsForUser(
+  userId: string,
+  options: { limit?: number } = {},
+): Promise<ExportJob[]> {
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), 50);
+
+  if (!isSupabaseConfigured()) {
+    const jobs = listMockExportJobs()
+      .filter((job) => job.user_id === userId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, limit);
+    return jobs.map(mapExportJobRow);
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from<ExportJobRow>("export_jobs")
+    .select("*")
+    .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(limit);
 

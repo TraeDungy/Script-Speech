@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
-import { getExportJobForUser } from "@/lib/exports/jobs";
+import { getExportJob } from "@/lib/exports";
 
 export async function GET(_request: Request, { params }: { params: { jobId: string } }) {
   try {
     const { user } = await requireServerAuthSession();
-    const job = await getExportJobForUser(params.jobId, user.id);
+    const job = await getExportJob(params.jobId);
 
-    if (!job) {
+    if (!job || (job.userId && job.userId !== user.id)) {
       return NextResponse.json({ error: "Export job not found" }, { status: 404 });
     }
 

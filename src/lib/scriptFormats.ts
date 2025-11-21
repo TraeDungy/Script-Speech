@@ -221,7 +221,7 @@ const BASE_SCRIPT_FORMATS = [
 ] as const satisfies readonly ScriptFormatDefinition[];
 
 type BaseScriptFormatId = (typeof BASE_SCRIPT_FORMATS)[number]["id"];
-export type ScriptFormatId = BaseScriptFormatId | (string & {});
+export type ScriptFormatId = BaseScriptFormatId | (string & { __opaqueScriptFormatId?: never });
 
 const registry = new Map<ScriptFormatId, ScriptFormatDefinition>();
 

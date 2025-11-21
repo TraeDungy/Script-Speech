@@ -5,6 +5,7 @@ export type ExportQueuePayload = {
   format: ExportFormat;
   scriptDoc: ScriptDoc;
   deliverToEmail?: string;
+  userId?: string;
 };
 
 export declare function enqueueExportJob(payload: ExportQueuePayload): Promise<ExportJob>;

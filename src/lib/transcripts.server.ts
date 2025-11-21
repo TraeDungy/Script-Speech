@@ -510,7 +510,6 @@ export interface StoredSessionMetadata extends OrchestratorSessionMetadata {}
 
 export async function fetchSessionMetadata(sessionId: string): Promise<StoredSessionMetadata | null> {
   const client = getClient();
-  const redis = getRedisClient();
 
   if (client) {
     try {

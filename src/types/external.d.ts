@@ -13,9 +13,13 @@ declare module "@sentry/node" {
   export function captureException(error: unknown, context?: CaptureContext): unknown;
 }
 declare module "@playwright/test" {
-  export const expect: any;
-  export const test: any;
-  export function defineConfig(config: unknown): unknown;
-  const configExport: any;
+  import type { defineConfig as playwrightDefineConfig, expect as playwrightExpect, test as playwrightTest } from "@playwright/test";
+
+  export const expect: typeof playwrightExpect;
+  export const test: typeof playwrightTest;
+  export function defineConfig(
+    ...args: Parameters<typeof playwrightDefineConfig>
+  ): ReturnType<typeof playwrightDefineConfig>;
+  const configExport: ReturnType<typeof playwrightDefineConfig>;
   export default configExport;
 }

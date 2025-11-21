@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
+import { getSupabaseServiceClient } from "@/lib/supabase.server";
 import { docSelect, loadScriptDoc } from "./utils";
 
 type AutosavePayload = {
