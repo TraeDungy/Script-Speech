@@ -32,11 +32,14 @@ function mapReferenceAssetRow(row: ReferenceAssetRow): ReferenceAsset {
     description: row.description,
     sourceType: row.source_type === "link" ? "external" : row.source_type,
     url: row.url,
+    storageKey: row.storage_key,
     thumbnailUrl: row.thumbnail_url,
     previewColor: row.preview_color,
     contentType: row.content_type,
     size: row.size,
     tags: row.tags ?? [],
+    beatTags: row.beat_tags ?? [],
+    sceneTags: row.scene_tags ?? [],
     status: row.status,
     scanStatus: row.scan_status,
     transcodeStatus: row.transcode_status,
@@ -125,11 +128,14 @@ export async function insertReferenceAsset(
     description: input.description ?? null,
     source_type: input.sourceType ?? (input.url ? "external" : "upload"),
     url: input.url ?? "",
+    storage_key: input.storageKey ?? null,
     thumbnail_url: null as string | null,
     preview_color: null as string | null,
     content_type: input.contentType,
     size: input.size,
     tags: input.tags ?? [],
+    beat_tags: input.beatTags ?? [],
+    scene_tags: input.sceneTags ?? [],
     status: "pending" as ReferenceAssetRow["status"],
     scan_status: "pending" as ReferenceAssetRow["scan_status"],
     transcode_status:
@@ -177,6 +183,9 @@ export async function modifyReferenceAsset(
   if (Object.prototype.hasOwnProperty.call(updates, "url")) {
     payload.url = updates.url ?? "";
   }
+  if (Object.prototype.hasOwnProperty.call(updates, "storageKey")) {
+    payload.storage_key = updates.storageKey ?? null;
+  }
   if (Object.prototype.hasOwnProperty.call(updates, "thumbnailUrl")) {
     payload.thumbnail_url = updates.thumbnailUrl ?? null;
   }
@@ -185,6 +194,12 @@ export async function modifyReferenceAsset(
   }
   if (Object.prototype.hasOwnProperty.call(updates, "tags")) {
     payload.tags = updates.tags ?? [];
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "beatTags")) {
+    payload.beat_tags = updates.beatTags ?? [];
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "sceneTags")) {
+    payload.scene_tags = updates.sceneTags ?? [];
   }
   if (Object.prototype.hasOwnProperty.call(updates, "status")) {
     payload.status = updates.status as ReferenceAssetRow["status"];
@@ -355,6 +370,9 @@ export async function updateReferenceAssetStatus(
   }
   if (Object.prototype.hasOwnProperty.call(status, "thumbnailUrl")) {
     payload.thumbnail_url = status.thumbnailUrl ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(status, "storageKey")) {
+    payload.storage_key = status.storageKey ?? null;
   }
 
   const { data, error } = await supabase

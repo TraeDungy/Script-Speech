@@ -1,5 +1,16 @@
 const STORAGE_DRIVER = process.env.STORAGE_DRIVER?.trim() ?? process.env.ASSET_STORAGE_DRIVER?.trim();
 
+function normaliseBucket(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed) return fallback;
+  return trimmed.replace(/\s+/g, "-");
+}
+
+function normaliseFolder(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim().replace(/^\//, "").replace(/\/$/, "");
+  return trimmed && trimmed.length > 0 ? trimmed : fallback;
+}
+
 export type StorageDriver = "supabase" | "s3" | "local";
 
 export function getStorageDriver(): StorageDriver {
@@ -15,8 +26,14 @@ export function getStorageDriver(): StorageDriver {
   return "local";
 }
 
-export const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET?.trim() || "reference-assets";
-export const SUPABASE_STORAGE_FOLDER = process.env.SUPABASE_STORAGE_FOLDER?.trim() || "reference";
+export const SUPABASE_STORAGE_BUCKET = normaliseBucket(
+  process.env.SUPABASE_STORAGE_BUCKET ?? process.env.ASSET_SUPABASE_BUCKET,
+  "reference-assets",
+);
+export const SUPABASE_STORAGE_FOLDER = normaliseFolder(
+  process.env.SUPABASE_STORAGE_FOLDER ?? process.env.ASSET_SUPABASE_FOLDER,
+  "reference",
+);
 
 export const STORAGE_SIGNED_URL_TTL_SECONDS = (() => {
   const raw = process.env.STORAGE_SIGNED_URL_TTL_SECONDS ?? process.env.ASSET_SIGNED_URL_TTL;

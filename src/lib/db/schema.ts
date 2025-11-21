@@ -71,11 +71,14 @@ export interface ReferenceAssetRow {
   description: string | null;
   source_type: "upload" | "external" | "link";
   url: string;
+  storage_key: string | null;
   thumbnail_url: string | null;
   preview_color: string | null;
   content_type: string;
   size: number;
   tags: string[] | null;
+  beat_tags: string[];
+  scene_tags: string[];
   status:
     | "pending"
     | "uploading"

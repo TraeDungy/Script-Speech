@@ -26,12 +26,17 @@ export interface SignedUpload {
   method: "PUT" | "POST";
   headers: Record<string, string>;
   assetUrl: string;
+  publicUrl?: string;
+  storageKey?: string;
   expiresAt: string;
 }
 
 export interface SignedDownload {
   url: string;
+  method: "GET";
   headers?: Record<string, string>;
+  assetUrl?: string;
+  publicUrl?: string;
   expiresAt: string;
 }
 
@@ -359,6 +364,8 @@ class LocalStorageProvider implements StorageProvider {
         "Content-Type": contentType,
       },
       assetUrl: `/api/assets/${assetId}`,
+      publicUrl: `/api/assets/${assetId}`,
+      storageKey: `${assetId}`,
       expiresAt: expires.toISOString(),
     };
   }
@@ -372,6 +379,10 @@ class LocalStorageProvider implements StorageProvider {
     const expiresAt = new Date(Date.now() + STORAGE_SIGNED_URL_TTL_SECONDS * 1000).toISOString();
     return {
       url: `/api/assets?assetId=${assetId}`,
+      method: "GET",
+      headers: {},
+      assetUrl: `/api/assets/${assetId}`,
+      publicUrl: `/api/assets/${assetId}`,
       expiresAt,
     };
   }
@@ -431,6 +442,8 @@ class SupabaseStorageProvider implements StorageProvider {
         "x-upsert": "false",
       },
       assetUrl: baseUrl ?? fallbackAssetUrl,
+      publicUrl: baseUrl ?? fallbackAssetUrl,
+      storageKey: path,
       expiresAt,
     };
   }
@@ -476,6 +489,10 @@ class SupabaseStorageProvider implements StorageProvider {
 
     return {
       url: absoluteUrl,
+      method: "GET",
+      headers: {},
+      assetUrl: baseUrl ?? absoluteUrl,
+      publicUrl: baseUrl ?? absoluteUrl,
       expiresAt: new Date(Date.now() + STORAGE_SIGNED_URL_TTL_SECONDS * 1000).toISOString(),
     };
   }
@@ -555,6 +572,8 @@ class S3StorageProvider implements StorageProvider {
         "Content-Type": contentType,
       },
       assetUrl,
+      publicUrl: S3_PUBLIC_BASE_URL ? `${S3_PUBLIC_BASE_URL.replace(/\/$/, "")}/${key}` : assetUrl,
+      storageKey: key,
       expiresAt,
     };
   }
@@ -599,6 +618,12 @@ class S3StorageProvider implements StorageProvider {
 
     return {
       url,
+      method: "GET",
+      headers: {},
+      assetUrl: url,
+      publicUrl: S3_PUBLIC_BASE_URL
+        ? `${S3_PUBLIC_BASE_URL.replace(/\/$/, "")}/${key}`
+        : `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`,
       expiresAt: new Date(Date.now() + STORAGE_SIGNED_URL_TTL_SECONDS * 1000).toISOString(),
     };
   }

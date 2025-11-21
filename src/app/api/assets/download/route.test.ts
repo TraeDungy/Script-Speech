@@ -54,7 +54,13 @@ describe("/api/assets/download", () => {
     mockGetStorageProvider.mockReturnValueOnce({
       createSignedDownload: vi
         .fn()
-        .mockResolvedValue({ url: "https://signed", expiresAt: "2024-01-01T00:00:00.000Z" }),
+        .mockResolvedValue({
+          url: "https://signed",
+          assetUrl: "https://public/asset-1",
+          method: "GET",
+          headers: {},
+          expiresAt: "2024-01-01T00:00:00.000Z",
+        }),
       createSignedUpload: vi.fn(),
     });
 
@@ -63,7 +69,13 @@ describe("/api/assets/download", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      download: { url: "https://signed", expiresAt: "2024-01-01T00:00:00.000Z" },
+      download: {
+        url: "https://signed",
+        assetUrl: "https://public/asset-1",
+        method: "GET",
+        headers: {},
+        expiresAt: "2024-01-01T00:00:00.000Z",
+      },
     });
   });
 

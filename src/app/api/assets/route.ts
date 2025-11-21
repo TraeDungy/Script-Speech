@@ -171,9 +171,12 @@ export async function POST(request: NextRequest) {
         });
 
         let responseAsset = asset;
-        if (!asset.url && signedUpload.assetUrl) {
+        if ((!asset.url && signedUpload.assetUrl) || signedUpload.storageKey) {
           try {
-            const updated = await updateReferenceAsset(asset.id, { url: signedUpload.assetUrl });
+            const updated = await updateReferenceAsset(asset.id, {
+              url: signedUpload.assetUrl ?? asset.url,
+              storageKey: signedUpload.storageKey,
+            });
             if (updated) {
               responseAsset = updated;
             }

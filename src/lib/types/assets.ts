@@ -25,11 +25,14 @@ export interface ReferenceAsset {
   description?: string | null;
   sourceType: AssetSourceType;
   url: string;
+  storageKey?: string | null;
   thumbnailUrl: string | null;
   previewColor: string | null;
   contentType: string;
   size: number;
   tags: string[];
+  beatTags?: string[];
+  sceneTags?: string[];
   status: AssetStatus;
   scanStatus: AssetScanStatus;
   transcodeStatus: AssetTranscodeStatus;
@@ -63,8 +66,11 @@ export interface CreateReferenceAssetInput {
   contentType: string;
   size: number;
   tags?: string[];
+  beatTags?: string[];
+  sceneTags?: string[];
   sourceType?: AssetSourceType;
   url?: string;
+  storageKey?: string | null;
   attribution?: string | null;
 }
 
