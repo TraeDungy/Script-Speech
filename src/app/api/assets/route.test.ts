@@ -59,9 +59,6 @@ const observabilityModule = vi.hoisted(() => ({
 
 vi.mock("@/lib/observability", () => observabilityModule);
 
-const mockRecordApiRequest = observabilityModule.recordApiRequest;
-const mockRecordApiError = observabilityModule.recordApiError;
-const mockCaptureApiException = observabilityModule.captureApiException;
 
 beforeEach(() => {
   vi.clearAllMocks();

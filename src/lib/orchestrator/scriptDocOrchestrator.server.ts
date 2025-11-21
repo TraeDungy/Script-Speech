@@ -33,8 +33,6 @@ const sceneBatchSchema = z.object({
 
 type PlannerResponse = z.infer<typeof plannerResponseSchema>;
 
-type SceneBatch = z.infer<typeof sceneBatchSchema>;
-
 interface StructuredStepOptions<T> {
   schema: z.ZodType<T>;
   schemaName: string;

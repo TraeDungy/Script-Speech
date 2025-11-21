@@ -15,7 +15,6 @@ import type {
   CreateEntityAssetInput,
   CreateReferenceAssetInput,
   EntityAsset,
-  EntityAssetTargetType,
   ReferenceAsset,
 } from "@/lib/types/assets";
 
@@ -24,7 +23,6 @@ export type {
   CreateEntityAssetInput,
   CreateReferenceAssetInput,
   EntityAsset,
-  EntityAssetTargetType,
   ReferenceAsset,
 } from "@/lib/types/assets";
 

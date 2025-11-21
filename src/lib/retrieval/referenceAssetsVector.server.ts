@@ -191,7 +191,11 @@ export async function searchReferenceAssetEmbeddings(
     }))
     .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
     .slice(0, matchCount)
-    .map(({ embedding: _embedding, ...rest }) => rest);
+    .map((record) => {
+      const rest = { ...record };
+      delete (rest as { embedding?: unknown }).embedding;
+      return rest;
+    });
 
   return scored;
 }

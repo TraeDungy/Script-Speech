@@ -1,6 +1,5 @@
 import type { ScriptDoc } from "@/lib/scriptDoc";
 import type { EntityAssetTargetType } from "@/lib/types/assets";
-import type { ExportFormat, ExportJobStatus } from "@/lib/exports/types";
 import type { Tables } from "./generated.types";
 
 export type ProjectRow = Tables<"projects">;
