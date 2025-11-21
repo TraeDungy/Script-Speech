@@ -106,11 +106,19 @@ describe("/api/assets", () => {
       id: "asset-1",
       projectId: "p1",
       url: "https://storage/asset-1",
+      storageKey: "p1/reference/asset-1",
     });
     mockGetStorageProvider.mockReturnValueOnce({
       createSignedUpload: vi
         .fn()
-        .mockResolvedValue({ uploadUrl: "signed", assetUrl: "https://storage/asset-1" }),
+        .mockResolvedValue({
+          uploadUrl: "signed",
+          assetUrl: "https://storage/asset-1",
+          storageKey: "p1/reference/asset-1",
+          method: "PUT",
+          headers: { "Content-Type": "audio/wav" },
+          expiresAt: "2024-01-01T00:00:00.000Z",
+        }),
       createSignedDownload: vi.fn(),
     });
 
@@ -123,11 +131,24 @@ describe("/api/assets", () => {
     const response = await POST(request);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      asset: { id: "asset-1", projectId: "p1", url: "https://storage/asset-1" },
-      upload: { uploadUrl: "signed", assetUrl: "https://storage/asset-1" },
+      asset: {
+        id: "asset-1",
+        projectId: "p1",
+        url: "https://storage/asset-1",
+        storageKey: "p1/reference/asset-1",
+      },
+      upload: {
+        uploadUrl: "signed",
+        assetUrl: "https://storage/asset-1",
+        storageKey: "p1/reference/asset-1",
+        method: "PUT",
+        headers: { "Content-Type": "audio/wav" },
+        expiresAt: "2024-01-01T00:00:00.000Z",
+      },
     });
     expect(mockUpdateReferenceAsset).toHaveBeenCalledWith("asset-1", {
       url: "https://storage/asset-1",
+      storageKey: "p1/reference/asset-1",
     });
   });
 
