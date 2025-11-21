@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
 import type { ExportFormat, ExportJob, ScriptDoc as ExportScriptDoc } from "@/lib/exports/types";
 import type {
   ScriptDoc as StudioScriptDoc,
   ScriptScene,
   ScriptSceneElement,
 } from "@/lib/scriptDoc";
+import { useExportJobStatus } from "@/lib/hooks/useExportJobStatus";
 import { useScriptDocStore } from "@/lib/state/scriptDocStore";
 
 interface ExportQueuePanelProps {
@@ -38,6 +40,11 @@ const statusStyles: Record<ExportJob["status"], StatusStyle> = {
     background: "bg-blue-500/10",
     text: "text-blue-200",
     border: "border-blue-500/30",
+  },
+  succeeded: {
+    background: "bg-emerald-500/10",
+    text: "text-emerald-200",
+    border: "border-emerald-500/30",
   },
   completed: {
     background: "bg-emerald-500/10",
@@ -105,18 +112,83 @@ const convertScriptDocForExport = (doc: StudioScriptDoc | null): ExportScriptDoc
   } satisfies ExportScriptDoc;
 };
 
-export function ExportQueuePanel() {
+function ExportJobRow({ job, onUpdate }: { job: ExportJob; onUpdate: (job: ExportJob) => void }) {
+  const { job: liveJob, error } = useExportJobStatus(job.id, { initialJob: job });
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const resolvedJob = liveJob ?? job;
+  const statusStyle = statusStyles[resolvedJob.status];
+
+  useEffect(() => {
+    if (liveJob) {
+      onUpdate(liveJob);
+    }
+  }, [liveJob, onUpdate]);
+
+  const handleDownload = async () => {
+    setDownloadError(null);
+    try {
+      const response = await fetch(`/api/exports/${resolvedJob.id}/download`, {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error ?? "Unable to generate download link");
+      }
+
+      const payload = (await response.json()) as { url: string };
+      window.open(payload.url, "_blank", "noreferrer");
+    } catch (downloadErr) {
+      setDownloadError(
+        downloadErr instanceof Error ? downloadErr.message : "Unable to download export",
+      );
+    }
+  };
+
+  return (
+    <li className="space-y-3 rounded-2xl border border-white/10 bg-black/30 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-medium text-white">{resolvedJob.format.toUpperCase()} export</p>
+          <p className="text-xs text-zinc-500">
+            Requested {new Date(resolvedJob.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+          </p>
+        </div>
+        <span
+          className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${statusStyle.background} ${statusStyle.text} ${statusStyle.border}`}
+        >
+          {resolvedJob.status}
+        </span>
+      </div>
+      {resolvedJob.downloadPath && (resolvedJob.status === "succeeded" || resolvedJob.status === "completed") ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="inline-flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-1 text-white transition hover:border-white/40 hover:bg-white/20"
+          >
+            Download {resolvedJob.downloadPath.split("/").pop() ?? "export"}
+          </button>
+        </div>
+      ) : null}
+      {downloadError ? <p className="text-sm text-rose-300">{downloadError}</p> : null}
+      {resolvedJob.errorMessage || resolvedJob.error ? (
+        <p className="text-sm text-rose-300">{resolvedJob.errorMessage ?? resolvedJob.error}</p>
+      ) : null}
+      {error ? <p className="text-xs text-amber-300">{error}</p> : null}
+    </li>
+  );
+}
+
+export function ExportQueuePanel({ projectId }: ExportQueuePanelProps) {
   const [jobs, setJobs] = useState<JobsState>({});
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState<ExportFormat | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [jobsError, setJobsError] = useState<string | null>(null);
-  const [isLoadingJobs, setIsLoadingJobs] = useState(false);
-  const jobIdsRef = useRef<string[]>([]);
   const doc = useScriptDocStore((state) => state.doc);
-  const projectId = doc.metadata?.projectId ?? "";
   const exportDoc = useMemo(() => convertScriptDocForExport(doc), [doc]);
+  const scriptDocId = doc?.revision?.id ?? null;
 
   const orderedJobs = useMemo(() => {
     return Object.values(jobs).sort((a, b) =>
@@ -124,98 +196,13 @@ export function ExportQueuePanel() {
     );
   }, [jobs]);
 
-  useEffect(() => {
-    jobIdsRef.current = [];
-    setJobs({});
-    setJobsError(null);
-
-    if (!projectId) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadJobs() {
-      setIsLoadingJobs(true);
-      setJobsError(null);
-      try {
-        const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export`, {
-          credentials: "include",
-        });
-        if (!response.ok) {
-          throw new Error("Failed to load export queue");
-        }
-        const payload = (await response.json()) as { jobs: ExportJob[] };
-        if (!cancelled) {
-          const nextJobs: JobsState = {};
-          const ids: string[] = [];
-          for (const job of payload.jobs) {
-            nextJobs[job.id] = job;
-            ids.push(job.id);
-          }
-          jobIdsRef.current = ids;
-          setJobs(nextJobs);
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          setJobsError(
-            loadError instanceof Error ? loadError.message : "Unable to load export queue",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingJobs(false);
-        }
-      }
-    }
-
-    void loadJobs();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
-
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (!jobIdsRef.current.length || !projectId) {
-        return;
-      }
-
-      const updatedJobs: ExportJob[] = [];
-
-      await Promise.all(
-        jobIdsRef.current.map(async (jobId) => {
-          try {
-            const response = await fetch(`/api/exports/${jobId}`);
-            if (!response.ok) {
-              return;
-            }
-            const job: ExportJob = await response.json();
-            updatedJobs.push(job);
-          } catch (pollError) {
-            console.error("Failed to poll export job", pollError);
-          }
-        }),
-      );
-
-      if (updatedJobs.length) {
-        setJobs((previous) => {
-          const next = { ...previous };
-          for (const job of updatedJobs) {
-            next[job.id] = job;
-          }
-          return next;
-        });
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [projectId]);
+  const upsertJob = useCallback((job: ExportJob) => {
+    setJobs((previous) => ({ ...previous, [job.id]: { ...previous[job.id], ...job } }));
+  }, []);
 
   const queueExport = async (format: ExportFormat) => {
-    if (!projectId || !exportDoc) {
-      setError("Project data is still loading. Please try again shortly.");
+    if (!exportDoc) {
+      setError("Script data is still loading. Please try again shortly.");
       return;
     }
 
@@ -224,7 +211,7 @@ export function ExportQueuePanel() {
     setError(null);
 
     try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/export`, {
+      const response = await fetch(`/api/exports`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -232,7 +219,8 @@ export function ExportQueuePanel() {
         credentials: "include",
         body: JSON.stringify({
           format,
-          scriptDoc: exportDoc,
+          scriptDocId: scriptDocId ?? undefined,
+          content: exportDoc,
           deliverToEmail: email.trim() ? email.trim() : undefined,
         }),
       });
@@ -243,24 +231,13 @@ export function ExportQueuePanel() {
       }
 
       const job: ExportJob = await response.json();
-      jobIdsRef.current = Array.from(new Set([...jobIdsRef.current, job.id]));
-      setJobs((previous) => ({ ...previous, [job.id]: job }));
-      setMessage(
-        job.deliverToEmail
-          ? "Export queued. We will email the download link when it is ready."
-          : "Export queued. Keep an eye on the queue for download links.",
-      );
+      upsertJob(job);
+      setMessage("Export queued. Keep this panel open to monitor progress.");
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to queue export");
     } finally {
       setIsSubmitting(null);
-      setRetryingJobId(null);
     }
-  };
-
-  const retryExport = async (job: ExportJob) => {
-    setRetryingJobId(job.id);
-    await queueExport(job.format, { deliverToEmail: job.deliverToEmail });
   };
 
   return (
@@ -269,8 +246,7 @@ export function ExportQueuePanel() {
         <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Export queue</p>
         <h2 className="text-lg font-semibold text-white">Preview export package</h2>
         <p className="text-sm text-zinc-400">
-          Queue Fountain, FDX, DOCX, or PDF exports. Jobs process asynchronously, and links appear as soon as the renderer
-          finishes.
+          Queue Fountain, FDX, DOCX, or PDF exports. Jobs process asynchronously, and links appear as soon as the renderer finishes.
         </p>
       </header>
 
@@ -291,9 +267,7 @@ export function ExportQueuePanel() {
               key={formatOption.value}
               type="button"
               onClick={() => queueExport(formatOption.value)}
-              disabled={
-                isSubmitting !== null || !projectId || !exportDoc || isLoadingJobs || Boolean(jobsError)
-              }
+              disabled={isSubmitting !== null || !exportDoc}
               className="rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:border-white/40 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSubmitting === formatOption.value ? "Queuing…" : `Queue ${formatOption.label}`}
@@ -302,13 +276,11 @@ export function ExportQueuePanel() {
         </div>
         {message ? <p className="text-sm text-emerald-200">{message}</p> : null}
         {error ? <p className="text-sm text-rose-300">{error}</p> : null}
-        {jobsError ? <p className="text-sm text-rose-300">{jobsError}</p> : null}
       </div>
 
       <div className="space-y-3">
         <div className="flex items-center justify-between text-xs uppercase tracking-[0.35em] text-zinc-500">
           <span>Active jobs</span>
-          {isLoadingJobs ? <span className="text-[0.6rem] text-zinc-400">Loading…</span> : null}
         </div>
         {orderedJobs.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-white/10 bg-black/20 p-4 text-sm text-zinc-500">
@@ -316,53 +288,9 @@ export function ExportQueuePanel() {
           </p>
         ) : (
           <ul className="space-y-4">
-            {orderedJobs.map((job) => {
-              const style = statusStyles[job.status];
-              return (
-                <li key={job.id} className="space-y-3 rounded-2xl border border-white/10 bg-black/30 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-white">{job.format.toUpperCase()} export</p>
-                      <p className="text-xs text-zinc-500">
-                        Requested {new Date(job.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-                      </p>
-                      {job.deliverToEmail ? (
-                        <p className="text-xs text-zinc-500">Email delivery: {job.deliverToEmail}</p>
-                      ) : null}
-                    </div>
-                    <span
-                      className={`inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${style.background} ${style.text} ${style.border}`}
-                    >
-                      {job.status}
-                    </span>
-                  </div>
-                  {job.result ? (
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <a
-                        href={`/api/exports/${job.id}/download`}
-                        className="inline-flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-3 py-1 text-white transition hover:border-white/40 hover:bg-white/20"
-                      >
-                        Download {job.result.fileName}
-                      </a>
-                      {job.result.notes ? (
-                        <span className="text-xs text-zinc-500">{job.result.notes}</span>
-                      ) : null}
-                      {job.result.readyAt ? (
-                        <span className="text-xs text-zinc-500">
-                          Ready {new Date(job.result.readyAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                      ) : null}
-                      {job.deliverToEmail ? (
-                        <span className="text-xs text-zinc-500">
-                          A copy has also been queued for delivery to {job.deliverToEmail}.
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {job.error ? <p className="text-sm text-rose-300">{job.error}</p> : null}
-                </li>
-              );
-            })}
+            {orderedJobs.map((job) => (
+              <ExportJobRow key={job.id} job={job} onUpdate={upsertJob} />
+            ))}
           </ul>
         )}
       </div>

@@ -1,80 +1,72 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { GET } from "./route";
 
-const exportsModule = vi.hoisted(() => ({
-  getExportJob: vi.fn(),
-}));
+const authModule = vi.hoisted(() => {
+  class UnauthorizedError extends Error {}
+  return {
+    requireServerAuthSession: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
+    UnauthorizedError,
+  };
+});
 
-const authModule = vi.hoisted(() => ({
-  requireServerAuthSession: vi.fn(),
-  UnauthorizedError: class extends Error {},
-}));
-
-const authzModule = vi.hoisted(() => ({
-  ensureProjectMembership: vi.fn(),
-  ProjectAuthorizationError: class extends Error {},
-}));
-
-const auditModule = vi.hoisted(() => ({
-  logAuditEvent: vi.fn(),
-}));
-
-const downloadsModule = vi.hoisted(() => ({
-  recordExportDownload: vi.fn(),
-}));
-
-vi.mock("@/lib/exports", () => exportsModule);
 vi.mock("@/lib/auth/server", () => authModule);
-vi.mock("@/lib/authz/projects.server", () => authzModule);
-vi.mock("@/lib/auditLog", () => auditModule);
-vi.mock("@/lib/db/exportDownloads", () => downloadsModule);
-vi.mock("@/lib/supabase.server", () => ({ getSupabaseServiceClient: () => null }));
 
-const mockGetExportJob = exportsModule.getExportJob;
-const mockRequireServerAuthSession = authModule.requireServerAuthSession;
-const UnauthorizedError = authModule.UnauthorizedError;
-const mockEnsureProjectMembership = authzModule.ensureProjectMembership;
-const mockRecordDownload = downloadsModule.recordExportDownload;
-const mockLogAuditEvent = auditModule.logAuditEvent;
+const jobsModule = vi.hoisted(() => ({
+  getExportJobForUser: vi.fn(),
+}));
+
+vi.mock("@/lib/exports/jobs", () => jobsModule);
+
+const supabase = {
+  storage: {
+    from: vi.fn().mockReturnThis(),
+    createSignedUrl: vi.fn(),
+  },
+};
+
+vi.mock("@/lib/supabase.server", () => ({
+  getSupabaseServiceClient: () => supabase,
+}));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockRequireServerAuthSession.mockResolvedValue({ user: { id: "user-1" } });
-  mockEnsureProjectMembership.mockResolvedValue(undefined);
-  mockRecordDownload.mockResolvedValue({ id: "token" });
+  supabase.storage.from.mockReturnThis();
+  supabase.storage.createSignedUrl.mockResolvedValue({ data: { signedUrl: "https://download" } });
+  jobsModule.getExportJobForUser.mockResolvedValue({
+    id: "job-1",
+    userId: "user-1",
+    status: "succeeded",
+    downloadPath: "exports/demo.json",
+  });
 });
 
 describe("/api/exports/[jobId]/download", () => {
-  it("redirects to an existing download URL", async () => {
-    mockGetExportJob.mockResolvedValueOnce({
-      id: "job-1",
-      projectId: "demo",
-      format: "pdf",
-      status: "completed",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      result: { fileName: "demo.pdf", downloadUrl: "data:text/plain;base64,ZmFrZQ==" },
-    });
-
+  it("returns a signed download url", async () => {
     const request = new NextRequest("http://localhost/api/exports/job-1/download");
     const response = await GET(request, { params: { jobId: "job-1" } });
-    expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toContain("data:text/plain");
-    expect(mockRecordDownload).toHaveBeenCalledWith(expect.objectContaining({ jobId: "job-1" }));
-    expect(mockLogAuditEvent).toHaveBeenCalledWith(expect.objectContaining({ action: "export.job.download" }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ url: expect.stringContaining("https://") });
   });
 
-  it("returns 404 when the job is missing", async () => {
-    mockGetExportJob.mockResolvedValueOnce(null);
+  it("returns 409 if the job is not ready", async () => {
+    jobsModule.getExportJobForUser.mockResolvedValueOnce({ id: "job-1", status: "processing" });
+    const request = new NextRequest("http://localhost/api/exports/job-1/download");
+    const response = await GET(request, { params: { jobId: "job-1" } });
+    expect(response.status).toBe(409);
+  });
+
+  it("returns 404 for missing jobs", async () => {
+    jobsModule.getExportJobForUser.mockResolvedValueOnce(null);
     const request = new NextRequest("http://localhost/api/exports/missing/download");
     const response = await GET(request, { params: { jobId: "missing" } });
     expect(response.status).toBe(404);
   });
 
-  it("enforces authentication", async () => {
-    mockRequireServerAuthSession.mockRejectedValueOnce(new UnauthorizedError("nope"));
+  it("returns 401 for unauthorized sessions", async () => {
+    const error = new authModule.UnauthorizedError();
+    authModule.requireServerAuthSession.mockRejectedValueOnce(error);
     const request = new NextRequest("http://localhost/api/exports/job-1/download");
     const response = await GET(request, { params: { jobId: "job-1" } });
     expect(response.status).toBe(401);

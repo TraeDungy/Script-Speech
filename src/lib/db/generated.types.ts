@@ -13,44 +13,80 @@ export type Database = {
         Row: {
           created_at: string;
           deliver_to_email: string | null;
+          download_path: string | null;
+          draft_version_id: string | null;
           error: string | null;
+          error_message: string | null;
           format: 'fountain' | 'fdx' | 'docx' | 'pdf';
           id: string;
           project_id: string;
           result: Json | null;
           script_doc: Json;
-          status: 'queued' | 'processing' | 'completed' | 'failed';
+          script_doc_id: string | null;
+          status: 'queued' | 'processing' | 'succeeded' | 'failed';
+          storage_bucket: string | null;
+          storage_driver: string | null;
+          storage_path: string | null;
           updated_at: string;
+          user_id: string | null;
         };
         Insert: {
           created_at?: string;
           deliver_to_email?: string | null;
+          download_path?: string | null;
+          draft_version_id?: string | null;
           error?: string | null;
+          error_message?: string | null;
           format: 'fountain' | 'fdx' | 'docx' | 'pdf';
           id?: string;
           project_id: string;
           result?: Json | null;
           script_doc: Json;
-          status?: 'queued' | 'processing' | 'completed' | 'failed';
+          script_doc_id?: string | null;
+          status?: 'queued' | 'processing' | 'succeeded' | 'failed';
+          storage_bucket?: string | null;
+          storage_driver?: string | null;
+          storage_path?: string | null;
           updated_at?: string;
+          user_id?: string | null;
         };
         Update: {
           created_at?: string;
           deliver_to_email?: string | null;
+          download_path?: string | null;
+          draft_version_id?: string | null;
           error?: string | null;
+          error_message?: string | null;
           format?: 'fountain' | 'fdx' | 'docx' | 'pdf';
           id?: string;
           project_id?: string;
           result?: Json | null;
           script_doc?: Json;
-          status?: 'queued' | 'processing' | 'completed' | 'failed';
+          script_doc_id?: string | null;
+          status?: 'queued' | 'processing' | 'succeeded' | 'failed';
+          storage_bucket?: string | null;
+          storage_driver?: string | null;
+          storage_path?: string | null;
           updated_at?: string;
+          user_id?: string | null;
         };
         Relationships: [
           {
             foreignKeyName: 'export_jobs_project_id_fkey';
             columns: ['project_id'];
             referencedRelation: 'projects';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'export_jobs_script_doc_id_fkey';
+            columns: ['script_doc_id'];
+            referencedRelation: 'script_docs';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'export_jobs_user_id_fkey';
+            columns: ['user_id'];
+            referencedRelation: 'users';
             referencedColumns: ['id'];
           },
         ];
