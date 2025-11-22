@@ -1,6 +1,10 @@
 # Script-Speech
 
-Voice-first scriptwriting assistant project. The repository now contains a Next.js (App Router) prototype for **Voice Script Studio**, aligning with the [development blueprint](docs/voice-script-studio-development.md).
+Voice-first scriptwriting assistant project. The repository now contains a Next.js (App Router) prototype for **Voice Script Studio**, aligning with the [development blueprint](docs/voice-script-studio-development.md). The app ships three main experiences:
+
+- **Marketing landing + FAQ**: Server-rendered marketing site that pulls copy from Supabase when configured and falls back to local JSON payloads.
+- **Studio prototype**: Early product shell with onboarding, voice chat, and script document scaffolding.
+- **Admin controls**: Supabase-backed marketing editor that enables draft/publish flows without redeploying.
 
 ## Quickstart
 
@@ -11,8 +15,21 @@ Voice-first scriptwriting assistant project. The repository now contains a Next.
    npm run dev
    ```
 
-2. Visit `http://localhost:3000` to explore the voice-first landing experience.
-3. Wire up optional backends (Supabase, Upstash Redis, OpenAI) using the guidance below, then consult [`docs/architecture.md`](docs/architecture.md) for a map of entry points, data flow, and runtime services.
+2. Visit `http://localhost:3000` to explore the voice-first landing experience (and `/studio` for the product shell).
+3. Wire up optional backends (Supabase, Upstash Redis, OpenAI) using the guidance below, then consult [`docs/architecture.md`](docs/architecture.md) and [`docs/developer-handbook.md`](docs/developer-handbook.md) for deep dives.
+
+### Core commands
+
+| Task | Command |
+| --- | --- |
+| Development server | `npm run dev` |
+| Production build | `npm run build` then `npm run start` |
+| Linting | `npm run lint` |
+| Type checks | `npm run type-check` |
+| Unit tests | `npm run test:unit` |
+| End-to-end tests (Playwright) | `npm run test:e2e` |
+
+See [`docs/developer-handbook.md`](docs/developer-handbook.md#testing--quality) for prerequisites and test data expectations.
 
 ### Supabase configuration (optional but recommended)
 
@@ -44,6 +61,28 @@ Run `npm run dev` and visit `/admin/marketing` while signed in to a Supabase acc
 - Promote a draft to production, which automatically archives the previous live revision.
 
 Every edit is stored in Supabase with author metadata so you can audit marketing changes alongside studio data.
+
+### Environment variables cheat sheet
+
+Add the following variables to `.env.local` (or your hosting provider). Optional values gracefully fall back to safe defaults:
+
+| Variable | Purpose |
+| --- | --- |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_KEY` | Enable Supabase persistence for marketing content, access requests, exports, and studio objects. |
+| `MARKETING_ADMIN_EMAILS` | Comma- or space-separated allowlist for accessing the marketing editor UI. |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Distributed rate limiting for realtime session creation and other throttled APIs. Falls back to in-memory when absent. |
+| `ORCHESTRATION_BASE_URL`, `ORCHESTRATION_API_KEY` | Optional external orchestrator for realtime sessions. When omitted, OpenAI realtime is used directly. |
+| `OPENAI_API_KEY`, `OPENAI_REALTIME_MODEL`, `OPENAI_REALTIME_VOICE` | Power realtime sessions and voice defaults. |
+| `ACCESS_REQUEST_STORE_PATH`, `ACCESS_REQUEST_RATE_LIMIT_MINUTES` | Tune the file-based fallback store for access requests. |
+| `EXPORT_BUCKET`, `EXPORT_PREFIX`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | S3 target for export jobs and their downloads. |
+
+### Routes to explore
+
+- `/` — Landing experience powered by Supabase-backed or local marketing copy.
+- `/faq` — Standalone FAQ view that reuses the marketing content pipeline.
+- `/studio` — Prototype workspace with onboarding wizard, reference library, and voice chat panel stubs.
+- `/admin/marketing` — Draft/publish editor for marketing payloads (requires Supabase auth + allowlist).
+- `/preview` — Marketing preview route used by admin links.
 
 ## Scripts
 
