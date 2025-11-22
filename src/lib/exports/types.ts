@@ -1,4 +1,4 @@
-export type ExportFormat = "fountain" | "fdx" | "docx" | "pdf";
+export type ExportFormat = "fountain" | "fdx" | "txt" | "rtf" | "docx" | "pdf";
 
 export type ExportJobStatus =
   | "queued"
@@ -17,6 +17,12 @@ export interface ExportJobResult {
   storagePath?: string;
   contentType?: string;
   size?: number;
+  pageCount?: number;
+  emailDelivery?: {
+    status: "sent" | "queued" | "failed" | "skipped";
+    to: string;
+    detail?: string;
+  };
 }
 
 export interface ExportJob {

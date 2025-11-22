@@ -18,6 +18,8 @@ interface ExportQueuePanelProps {
 const formats: { value: ExportFormat; label: string }[] = [
   { value: "fountain", label: "Fountain" },
   { value: "fdx", label: "FDX" },
+  { value: "txt", label: "TXT" },
+  { value: "rtf", label: "RTF" },
   { value: "docx", label: "DOCX" },
   { value: "pdf", label: "PDF" },
 ];
@@ -288,7 +290,7 @@ export function ExportQueuePanel({ projectId }: ExportQueuePanelProps) {
         <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Export queue</p>
         <h2 className="text-lg font-semibold text-white">Preview export package</h2>
         <p className="text-sm text-zinc-400">
-          Queue Fountain, FDX, DOCX, or PDF exports. Jobs process asynchronously, and links appear as soon as the renderer finishes.
+          Queue Fountain, FDX, TXT, RTF, DOCX, or PDF exports. Jobs process asynchronously, and links appear as soon as the renderer finishes.
         </p>
       </header>
 
