@@ -89,6 +89,18 @@ This plan breaks down the major gaps identified in the Script-Speech prototype a
   - Native integrations (call sheets, casting tools) aligned with studio workflows.
 - **Dependencies:** Monorepo tooling, cross-platform design system.
 
+## 9. Analytics and privacy
+- **Goal:** Capture completion and export funnel performance while giving users control over retention and deletion.
+- **Near-term tasks:**
+  - Instrument onboarding completion, project creation, and export queue events with OpenTelemetry metrics/traces and structured logs.
+  - Add client-side instrumentation hooks in the onboarding wizard and export panels so funnel drop-off is observable.
+  - Introduce an "ephemeral" project/session mode that bypasses persistence except for cached transcripts needed in-session.
+  - Expose per-project retention toggles (e.g., 24 hours, 30 days, manual only) and a hard delete control beyond Supabase defaults.
+- **Longer-term initiatives:**
+  - Build dashboards for completion/export funnels, segmented by script type and acquisition channel.
+  - Automate retention enforcement via scheduled jobs (TTL policies, background workers) with audit logs for deletions.
+- **Dependencies:** Telemetry backend (OTel collector + vendor), Supabase row-level TTL policies or cron jobs, product design for retention UX.
+
 ## Supabase backend decision
 Setting up Supabase is the recommended next step to unblock durable storage and auth workstreams. This repository will treat Supabase as the default database, while retaining file-based fallbacks for local development. The `access_requests` table schema is provided in `docs/supabase/access-requests-table.sql` and the application auto-detects Supabase configuration via the `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` environment variables.
 
