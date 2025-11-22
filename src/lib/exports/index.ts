@@ -548,16 +548,21 @@ async function maybeDeliverExportEmail(
   }
 
   const endpoint = process.env.EXPORT_DELIVERY_EMAIL_ENDPOINT;
+  const apiKey = process.env.EXPORT_DELIVERY_EMAIL_API_KEY;
 
   try {
     if (endpoint) {
-      await postJson(endpoint, {
-        to: deliverToEmail,
-        jobId,
-        format,
-        fileName,
-        downloadUrl,
-      });
+      await postJson(
+        endpoint,
+        {
+          to: deliverToEmail,
+          jobId,
+          format,
+          fileName,
+          downloadUrl,
+        },
+        apiKey,
+      );
       return { status: "sent", to: deliverToEmail };
     }
 
@@ -590,10 +595,15 @@ function buildDownloadReference(artifact: StoredArtifact, fileName: string): str
   return null;
 }
 
-async function postJson(url: string, payload: unknown): Promise<void> {
+async function postJson(url: string, payload: unknown, apiKey?: string): Promise<void> {
+  const headers: HeadersInit = { "Content-Type": "application/json" };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
 

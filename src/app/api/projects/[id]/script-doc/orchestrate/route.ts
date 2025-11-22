@@ -9,16 +9,10 @@ import {
 import { fetchLatestScriptDoc } from "@/lib/db/scriptDocs";
 import { ScriptDocAiOrchestrator } from "@/lib/ai/orchestration.service";
 import { evaluatePromptGuardrails } from "@/lib/orchestrator/guardrails";
-import {
-  searchScriptDocEmbeddings,
-  upsertScriptDocEmbeddings,
-} from "@/lib/retrieval/referenceRetrieval.server";
-import {
-  searchReferenceAssetEmbeddings,
-  upsertReferenceAssetEmbeddings,
-} from "@/lib/retrieval/referenceAssetsVector.server";
+import { getOrchestrationRetrievalService } from "@/lib/orchestrator/retrieval.service";
 
 const service = new ScriptDocAiOrchestrator();
+const retrievalService = getOrchestrationRetrievalService();
 
 export async function POST(
   request: NextRequest,
@@ -61,40 +55,11 @@ export async function POST(
 
     const docId = record.doc.revision?.id ?? `${projectId}-draft`;
 
-    await Promise.all([
-      upsertScriptDocEmbeddings({
-        projectId,
-        docId,
-        doc: record.doc,
-        referenceAssets: references,
-        entityAssets,
-      }).catch((error) => {
-        console.error("Failed to sync ScriptDoc embeddings", error);
-      }),
-      upsertReferenceAssetEmbeddings({ projectId, assets: references }).catch((error) => {
-        console.error("Failed to sync reference asset embeddings", error);
-      }),
-    ]);
-
-    const [contextMatches, referenceMatches] = await Promise.all([
-      searchScriptDocEmbeddings({
-        projectId,
-        docId,
-        query: body.prompt,
-        matchCount: 8,
-      }).catch((error) => {
-        console.error("Failed to search ScriptDoc embeddings", error);
-        return [];
-      }),
-      searchReferenceAssetEmbeddings({
-        projectId,
-        query: body.prompt,
-        matchCount: 6,
-      }).catch((error) => {
-        console.error("Failed to search reference asset embeddings", error);
-        return [];
-      }),
-    ]);
+    const assets = { referenceAssets: references, entityAssets };
+    const { scriptDoc: contextMatches, references: referenceMatches } = await retrievalService.syncAndSearch(
+      { projectId, docId, prompt: body.prompt, doc: record.doc },
+      assets,
+    );
 
     const orchestration = await service.orchestrate({
       doc: record.doc,
