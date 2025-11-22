@@ -31,6 +31,8 @@ Voice-first scriptwriting assistant project. The repository now contains a Next.
 
 See [`docs/developer-handbook.md`](docs/developer-handbook.md#testing--quality) for prerequisites and test data expectations.
 
+For a walkthrough of how the current prototype maps to the voice-first product goals (including manual editing surfaces that sit alongside voice capture), see [`docs/codebase-analysis.md`](docs/codebase-analysis.md).
+
 ### Supabase configuration (optional but recommended)
 
 The application now auto-detects a Supabase backend for durable storage. To enable it:
