@@ -14,6 +14,23 @@ export interface ScriptDocConceptAnalysis {
   conversationLog?: ScriptDocTranscriptEntry[];
 }
 
+export interface ScriptDocExportSnapshot {
+  id: string;
+  format: "fountain" | "fdx" | "docx" | "pdf";
+  status: "queued" | "processing" | "completed" | "failed";
+  capturedAt: string;
+  jobId?: string;
+  draftVersionId?: string;
+  fileName?: string;
+  downloadUrl?: string;
+  notes?: string;
+  storageDriver?: "supabase" | "s3" | "local";
+  storageBucket?: string;
+  storagePath?: string;
+  contentType?: string;
+  size?: number;
+}
+
 export interface ScriptDocMetadata {
   projectId: string;
   title: string;
@@ -30,6 +47,26 @@ export interface ScriptDocMetadata {
 export interface ScriptDoc {
   metadata: ScriptDocMetadata;
   conceptAnalysis: ScriptDocConceptAnalysis;
-  beats: Array<{ id: string; order: number; title: string; sceneIds?: string[] }>;
-  scenes: Array<{ id: string; order: number; beatId: string; elements: Array<{ id: string; type: string }> }>;
+  exportSnapshots: ScriptDocExportSnapshot[];
+  beats: Array<{
+    id: string;
+    order: number;
+    title: string;
+    sceneIds?: string[];
+    locationIds?: string[];
+    propIds?: string[];
+  }>;
+  scenes: Array<{
+    id: string;
+    order: number;
+    beatId: string;
+    elements: Array<{
+      id: string;
+      type: string;
+      locationIds?: string[];
+      propIds?: string[];
+    }>;
+    propIds?: string[];
+    locationIds?: string[];
+  }>;
 }
