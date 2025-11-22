@@ -80,7 +80,7 @@ This plan breaks down the major gaps identified in the Script-Speech prototype a
 - **Dependencies:** Testing framework setup, observability vendor.
 
 ## 8. Cross-platform experience
-- **Goal:** Extend the Script-Speech experience beyond web to mobile and offline contexts.
+- **Goal:** Extend the Script-Speech experience beyond web to mobile and offline contexts. No mobile client exists yet; this repo currently ships only the Next.js surface.
 - **Near-term tasks:**
   - Share core ScriptDoc models and API clients with an Expo app scaffold.
   - Evaluate offline caching for script editing using SQLite/WatermelonDB.
