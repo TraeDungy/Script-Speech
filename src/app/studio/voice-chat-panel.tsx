@@ -1,6 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+
 import { createRealtimeClient, type RealtimeClientEvent } from "@/lib/realtime";
 import type { OrchestratorSessionMetadata, TranscriptTurnDTO } from "@/lib/realtime/schema";
 import type { ScriptDocTranscriptEntry } from "@/lib/scriptDoc";
@@ -15,7 +25,20 @@ type TranscriptMessage = {
   updatedAt: number;
 };
 
+type VoiceChatContextValue = {
+  messages: TranscriptMessage[];
+  statusLabel: string;
+  connectionState: RTCPeerConnectionState;
+  isMicActive: boolean;
+  micDisabled: boolean;
+  error: string | null;
+  prefersReducedMotion: boolean;
+  handleMicToggle: () => Promise<void>;
+  setAudioElement: (element: HTMLAudioElement | null) => void;
+};
+
 const MAX_MESSAGES = 20;
+const VoiceChatContext = createContext<VoiceChatContextValue | null>(null);
 
 function formatRole(role?: string) {
   if (!role) {
@@ -112,7 +135,7 @@ function messageToStoreEntry(message: TranscriptMessage): ScriptDocTranscriptEnt
   };
 }
 
-export function VoiceChatPanel() {
+export function VoiceChatProvider({ children }: { children: ReactNode }) {
   const projectId = useScriptDocStore((state) => state.doc.metadata.projectId);
   const appendTranscriptTurn = useScriptDocStore((state) => state.appendTranscriptTurn);
   const loadTranscriptLog = useScriptDocStore((state) => state.loadTranscriptLog);
@@ -149,6 +172,13 @@ export function VoiceChatPanel() {
     }
 
     return;
+  }, []);
+
+  const setAudioElement = useCallback((element: HTMLAudioElement | null) => {
+    audioRef.current = element;
+    if (element) {
+      clientRef.current.attachRemoteAudioElement(element);
+    }
   }, []);
 
   const ingestTranscriptTurn = useCallback(
@@ -213,6 +243,7 @@ export function VoiceChatPanel() {
           const resolvedRole = role ? formatRole(role) : undefined;
           const canonicalRole = role ?? (index >= 0 ? next[index].canonicalRole : "assistant");
           const trimmedText = text?.trim();
+          const normalizedText = trimmedText?.length ? trimmedText : undefined;
 
           if (index >= 0) {
             const existing = next[index];
@@ -263,7 +294,13 @@ export function VoiceChatPanel() {
         const delta = data.delta as Record<string, unknown> | undefined;
         const text = extractTextFromContent(delta?.content ?? delta);
         if (text) {
-          updateMessage(data.item_id as string | undefined, (delta?.role ?? data.role) as string | undefined, text, delta?.status === "completed", true);
+          updateMessage(
+            data.item_id as string | undefined,
+            (delta?.role ?? data.role) as string | undefined,
+            text,
+            delta?.status === "completed",
+            true,
+          );
         }
         return;
       }
@@ -508,6 +545,86 @@ export function VoiceChatPanel() {
   }, [isMicActive]);
 
   const micDisabled = !isMicActive && connectionState !== "connected";
+
+  const value = useMemo(
+    () => ({
+      messages: sortedMessages,
+      statusLabel,
+      connectionState,
+      isMicActive,
+      micDisabled,
+      error,
+      prefersReducedMotion,
+      handleMicToggle,
+      setAudioElement,
+    }),
+    [connectionState, error, handleMicToggle, isMicActive, micDisabled, prefersReducedMotion, setAudioElement, sortedMessages, statusLabel],
+  );
+
+  return <VoiceChatContext.Provider value={value}>{children}</VoiceChatContext.Provider>;
+}
+
+function useVoiceChat() {
+  const context = useContext(VoiceChatContext);
+  if (!context) {
+    throw new Error("VoiceChat components must be used within VoiceChatProvider");
+  }
+  return context;
+}
+
+export function VoiceControlBar() {
+  const { statusLabel, connectionState, isMicActive, micDisabled, handleMicToggle, error } = useVoiceChat();
+
+  return (
+    <section className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-[0.35em] text-zinc-500">Voice control</p>
+          <p className="text-sm text-zinc-300">
+            Drive slot filling and script updates hands-free. Start the microphone to feed the realtime agents.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <span
+            className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs uppercase tracking-[0.2em] ${
+              statusLabel === "Live" ? "bg-emerald-500/15 text-emerald-200" : "bg-zinc-800 text-zinc-300"
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                connectionState === "connected"
+                  ? "bg-emerald-400"
+                  : connectionState === "connecting"
+                  ? "bg-amber-300"
+                  : "bg-zinc-500"
+              }`}
+              aria-hidden="true"
+            />
+            {statusLabel}
+          </span>
+          <button
+            type="button"
+            onClick={handleMicToggle}
+            disabled={micDisabled}
+            className={`rounded-full border px-4 py-2 text-xs uppercase tracking-[0.3em] transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+              isMicActive
+                ? "border-emerald-400/50 bg-emerald-500/10 text-emerald-100 hover:border-emerald-300 hover:text-white"
+                : "border-white/10 bg-black/40 text-white hover:border-white/30"
+            }`}
+          >
+            {isMicActive ? "Stop microphone" : "Start microphone"}
+          </button>
+        </div>
+      </div>
+      {error ? <p className="mt-2 text-xs text-rose-300">{error}</p> : null}
+    </section>
+  );
+}
+
+export function VoiceChatPanel() {
+  const { messages, statusLabel, isMicActive, micDisabled, handleMicToggle, error, prefersReducedMotion, setAudioElement } =
+    useVoiceChat();
+
   const listItemMotion = prefersReducedMotion ? "" : " transition-transform duration-300 hover:-translate-y-0.5";
   const hoverMotion = prefersReducedMotion ? "" : " transition-colors duration-300";
 
@@ -518,16 +635,13 @@ export function VoiceChatPanel() {
         <span className={statusLabel === "Live" ? "text-emerald-400" : "text-zinc-500"}>{statusLabel}</span>
       </div>
       <ul className="mt-6 space-y-5">
-        {sortedMessages.length === 0 ? (
+        {messages.length === 0 ? (
           <li className={`rounded-2xl border border-dashed border-white/10 bg-vs-panel/40 p-4 text-sm text-zinc-400${hoverMotion}`}>
             <p>Connect your microphone to start capturing directives for the Script Speech agents.</p>
           </li>
         ) : (
-          sortedMessages.map((message) => (
-            <li
-              key={message.id}
-              className={`space-y-2 rounded-2xl border border-white/10 bg-vs-panel p-4${listItemMotion}`}
-            >
+          messages.map((message) => (
+            <li key={message.id} className={`space-y-2 rounded-2xl border border-white/10 bg-vs-panel p-4${listItemMotion}`}>
               <p className="text-xs uppercase tracking-[0.25em] text-zinc-500">{message.role}</p>
               <p className="text-sm text-zinc-300">{message.text}</p>
             </li>
@@ -546,7 +660,7 @@ export function VoiceChatPanel() {
         <span className={`h-2 w-2 rounded-full ${isMicActive ? "bg-emerald-400" : "bg-zinc-500"}`} aria-hidden="true" />
       </button>
       {error ? <p className="mt-4 text-xs text-rose-300">{error}</p> : null}
-      <audio ref={audioRef} className="hidden" />
+      <audio ref={setAudioElement} className="hidden" />
     </div>
   );
 }
