@@ -6,6 +6,7 @@ export type ExportQueuePayload = {
   scriptDoc: ScriptDoc;
   deliverToEmail?: string;
   userId?: string;
+  draftVersionId?: string | null;
 };
 
 export declare function enqueueExportJob(payload: ExportQueuePayload): Promise<ExportJob>;

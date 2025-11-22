@@ -14,4 +14,14 @@ export function updateReferenceAsset(
   assetId: string,
   updates: Partial<ReferenceAsset>,
 ): Promise<ReferenceAsset | null>;
+export function updateReferenceAssetLifecycle(
+  assetId: string,
+  updates: Partial<ReferenceAsset>,
+): Promise<ReferenceAsset | null>;
 export function serializeReferenceAsset(asset: ReferenceAsset): ReferenceAsset;
+export function searchAssets(input: {
+  projectId?: string;
+  query?: string | null;
+  tags?: string[];
+  includePrivate?: boolean;
+}): Promise<ReferenceAsset[]>;

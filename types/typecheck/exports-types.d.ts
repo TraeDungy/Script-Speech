@@ -1,17 +1,27 @@
 export type ExportFormat = "fountain" | "fdx" | "docx" | "pdf";
-export type ExportJobStatus = "queued" | "processing" | "completed" | "failed";
+export type ExportJobStatus = "queued" | "processing" | "succeeded" | "completed" | "failed";
 
 export interface ExportJobResult {
-  downloadUrl: string;
   fileName: string;
+  storageBucket?: string;
+  storagePath?: string;
+  storageDriver?: "supabase" | "s3" | "local";
+  downloadUrl?: string;
+  readyAt?: string;
+  contentType?: string;
+  size?: number;
   notes?: string;
 }
 
 export interface ExportJob {
   id: string;
-  projectId: string;
+  projectId?: string;
+  userId?: string;
+  scriptDocId?: string | null;
+  draftVersionId?: string;
   format: ExportFormat;
   status: ExportJobStatus;
+  downloadPath?: string | null;
   createdAt: string;
   updatedAt: string;
   deliverToEmail?: string;

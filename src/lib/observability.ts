@@ -5,6 +5,7 @@ import {
   context as otelContext,
   metrics,
   trace,
+  type Attributes,
   type Span,
 } from "@opentelemetry/api";
 
@@ -149,7 +150,7 @@ export function recordBusinessEvent(
   ) as Record<string, string>;
 
   const counter = createCounter(name, description);
-  const key = formatAttributes(normalizedAttributes as ApiMetricAttributes);
+  const key = formatAttributes(normalizedAttributes as Record<string, unknown>);
   const current = counter.values.get(key) ?? 0;
   counter.values.set(key, current + 1);
 
@@ -165,7 +166,7 @@ export function recordBusinessEvent(
 function startOtelSpan(name: string, attributes?: Record<string, unknown>): Span | null {
   try {
     const tracer = trace.getTracer("script-speech");
-    return tracer.startSpan(name, { attributes });
+    return tracer.startSpan(name, { attributes: attributes as Attributes | undefined });
   } catch (error) {
     console.warn("[observability] Unable to start OpenTelemetry span", error);
     return null;
