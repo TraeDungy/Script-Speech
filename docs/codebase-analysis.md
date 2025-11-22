@@ -28,3 +28,4 @@ This document maps the current Next.js prototype to the product goals for a cros
 - Wire realtime orchestrator endpoints and persistence APIs so autosave and export download links work outside the prototype.
 - Expand accessibility testing (keyboard traps, focus order, captions for audio/voice states) and add automated checks to CI.
 - Document schema backing for ScriptDoc persistence and ExportJob handling so server implementations match the client contract.
+- Add analytics for completion/export funnels and introduce retention controls beyond Supabase defaults (ephemeral sessions, per-project deletion/TTL toggles).
