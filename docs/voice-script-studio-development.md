@@ -89,7 +89,7 @@
 ## 7. Platform Strategy
 
 - **Web:** Next.js (App Router) with TypeScript & Tailwind UI, deployed to Vercel.
-- **Mobile:** React Native (Expo) for iOS (16+) and Android (9+) with shared component library.
+- **Mobile:** React Native (Expo) for iOS (16+) and Android (9+) with shared component library (not yet implemented; current repo only includes the web surface).
 - **Backend:** NestJS + Fastify, Prisma ORM (Postgres), Redis for cache/queues, S3-compatible storage.
 - **Realtime Voice:** WebRTC/WebSocket relay to OpenAI Realtime sessions with server-side tool orchestration.
 

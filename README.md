@@ -1,6 +1,6 @@
 # Script-Speech
 
-Voice-first scriptwriting assistant project. The repository now contains a Next.js (App Router) prototype for **Voice Script Studio**, aligning with the [development blueprint](docs/voice-script-studio-development.md). The app ships three main experiences:
+Voice-first scriptwriting assistant project. The repository now contains a Next.js (App Router) prototype for **Voice Script Studio**, aligning with the [development blueprint](docs/voice-script-studio-development.md). Only the web surface exists today—mobile clients are not yet implemented. The app ships three main experiences:
 
 - **Marketing landing + FAQ**: Server-rendered marketing site that pulls copy from Supabase when configured and falls back to local JSON payloads.
 - **Studio prototype**: Early product shell with onboarding, voice chat, and script document scaffolding.

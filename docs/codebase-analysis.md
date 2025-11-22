@@ -24,7 +24,7 @@ This document maps the current Next.js prototype to the product goals for a cros
 
 ## Gaps and recommendations
 - Implement export pipeline coverage for TXT and RTF/DOCX parity, and ensure email delivery hooks connect to a mailer (not just client-side input).
-- Add mobile surfaces (React Native/Expo) or responsive variants for parity with the cross-platform goal.
+- Add mobile surfaces (React Native/Expo) or responsive variants for parity with the cross-platform goal (currently only the Next.js web experience exists).
 - Wire realtime orchestrator endpoints and persistence APIs so autosave and export download links work outside the prototype.
 - Expand accessibility testing (keyboard traps, focus order, captions for audio/voice states) and add automated checks to CI.
 - Document schema backing for ScriptDoc persistence and ExportJob handling so server implementations match the client contract.
