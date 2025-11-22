@@ -12,6 +12,7 @@ const stringArraySchema = z.array(z.string());
 const lengthUnitSchema = z.enum(["pages", "minutes", "seconds"]);
 const scriptFormatIdSchema: ZodType<ScriptFormat> = z.string();
 const scriptFormatDefinitionSchema: ZodType<ScriptFormatDefinition> = z.any();
+const exportFormatSchema = z.enum(["fountain", "fdx", "docx", "pdf"]);
 
 export const scriptDocFormatRecommendationSchema = z.object({
   formatId: z.string(),
@@ -181,6 +182,7 @@ export const scriptDocBeatSchema = z.object({
   intent: z.string().optional(),
   spotlightCharacterIds: stringArraySchema.default([]),
   locationIds: stringArraySchema.default([]),
+  propIds: stringArraySchema.default([]),
   referenceAssetIds: stringArraySchema.default([]),
   durationSeconds: z.number().optional(),
   sceneIds: stringArraySchema.default([]),
@@ -203,6 +205,8 @@ const scriptSceneElementBaseSchema = z.object({
   type: scriptSceneElementTypeSchema,
   text: z.string(),
   referenceAssetIds: stringArraySchema.optional(),
+  locationIds: stringArraySchema.default([]),
+  propIds: stringArraySchema.default([]),
 });
 
 export const scriptSceneActionElementSchema = scriptSceneElementBaseSchema.extend({
@@ -260,9 +264,29 @@ export const scriptSceneSchema = z.object({
   referenceAssetIds: stringArraySchema.default([]),
   locationIds: stringArraySchema.default([]),
   characterIds: stringArraySchema.default([]),
+  propIds: stringArraySchema.default([]),
 });
 
 export type ScriptScene = z.infer<typeof scriptSceneSchema>;
+
+export const scriptDocExportSnapshotSchema = z.object({
+  id: z.string(),
+  format: exportFormatSchema,
+  status: z.enum(["queued", "processing", "completed", "failed"]),
+  capturedAt: z.string(),
+  jobId: z.string().optional(),
+  draftVersionId: z.string().optional(),
+  fileName: z.string().optional(),
+  downloadUrl: z.string().optional(),
+  notes: z.string().optional(),
+  storageDriver: z.enum(["supabase", "s3", "local"]).optional(),
+  storageBucket: z.string().optional(),
+  storagePath: z.string().optional(),
+  contentType: z.string().optional(),
+  size: z.number().optional(),
+});
+
+export type ScriptDocExportSnapshot = z.infer<typeof scriptDocExportSnapshotSchema>;
 
 export const scriptDocRevisionSchema = z.object({
   id: z.string(),
@@ -284,6 +308,7 @@ export const scriptDocSchema = z.object({
   props: z.array(scriptDocPropSchema),
   beats: z.array(scriptDocBeatSchema),
   scenes: z.array(scriptSceneSchema),
+  exportSnapshots: z.array(scriptDocExportSnapshotSchema).default([]),
   conceptAnalysis: scriptDocConceptAnalysisSchema,
 });
 

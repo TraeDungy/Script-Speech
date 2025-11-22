@@ -181,6 +181,7 @@ const createInitialScriptDoc = (): ScriptDoc => ({
   props: [],
   beats: [],
   scenes: [],
+  exportSnapshots: [],
   conceptAnalysis: {
     conceptSummary: "",
     keywords: [],
@@ -288,6 +289,7 @@ export const useScriptDocStore = create<ScriptDocStore>((set, get) => ({
       summary: "Detail what should happen in this moment.",
       spotlightCharacterIds: [],
       locationIds: [],
+      propIds: [],
       referenceAssetIds: [],
       sceneIds: [],
     };
