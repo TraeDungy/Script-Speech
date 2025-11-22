@@ -19,6 +19,18 @@ export interface ExportJobRow {
 export declare function createExportJobRecord(payload: ExportQueuePayload): Promise<ExportJob>;
 export declare function updateExportJobRecord(
   jobId: string,
-  updates: Partial<{ status: string; result: unknown; error: string | null }>,
+  updates: Partial<{
+    status: string;
+    result: unknown;
+    error: string | null;
+    storage_driver?: string | null;
+    storage_bucket?: string | null;
+    storage_path?: string | null;
+  }>,
 ): Promise<void>;
 export declare function fetchExportJobRecord(jobId: string): Promise<ExportJob | null>;
+export declare function listExportJobsForProject(
+  projectId: string,
+  options?: { limit?: number },
+): Promise<ExportJob[]>;
+export declare function listExportJobsForUser(userId: string): Promise<ExportJob[]>;

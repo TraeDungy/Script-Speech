@@ -2,8 +2,9 @@ export interface SignedUpload {
   uploadUrl: string;
   method: "PUT" | "POST";
   headers: Record<string, string>;
-  assetUrl: string;
+  assetUrl?: string;
   expiresAt: string;
+  storageKey?: string;
 }
 
 export interface StorageProvider {
@@ -13,6 +14,12 @@ export interface StorageProvider {
     size: number;
     projectId?: string | null;
   }): Promise<SignedUpload>;
+  createSignedDownload(input: {
+    assetId: string;
+    projectId?: string | null;
+    contentType?: string;
+    fileName?: string;
+  }): Promise<{ url: string }>;
 }
 
 export function getStorageProvider(): StorageProvider;

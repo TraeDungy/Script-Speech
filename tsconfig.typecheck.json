@@ -18,7 +18,16 @@
       "@/lib/storage": ["./types/typecheck/storage.d.ts"],
       "@/lib/observability": ["./types/typecheck/observability.d.ts"],
       "@/lib/exports": ["./types/typecheck/exports.d.ts"],
-      "@/lib/exports/types": ["./types/typecheck/exports-types.d.ts"]
+      "@/lib/exports/types": ["./types/typecheck/exports-types.d.ts"],
+      "@/lib/auth/server": ["./types/typecheck/auth.server.d.ts"],
+      "@/lib/authz/projects.server": ["./types/typecheck/authz-projects.server.d.ts"],
+      "@/lib/rateLimit": ["./types/typecheck/rateLimit.d.ts"],
+      "@/lib/auditLog": ["./types/typecheck/auditLog.d.ts"],
+      "@/lib/requestContext": ["./types/typecheck/requestContext.d.ts"],
+      "@/lib/db/exportDownloads": ["./types/typecheck/db-exportDownloads.d.ts"],
+      "@/lib/db/draftVersions": ["./types/typecheck/db-draftVersions.d.ts"],
+      "@/lib/supabase.server": ["./types/typecheck/supabase.server.d.ts"],
+      "@/lib/storage/config": ["./types/typecheck/storage-config.d.ts"]
     }
   },
   "include": [

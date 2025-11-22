@@ -1,0 +1,9 @@
+export const SUPABASE_STORAGE_BUCKET: string | undefined
+export const S3_BUCKET: string | undefined
+export const S3_PREFIX: string | undefined
+export const S3_REGION: string | undefined
+export const S3_ENDPOINT: string | undefined
+export const S3_ACCESS_KEY_ID: string | undefined
+export const S3_SECRET_ACCESS_KEY: string | undefined
+export const S3_SESSION_TOKEN: string | undefined
+export const S3_FORCE_PATH_STYLE: boolean | undefined

@@ -20,6 +20,14 @@ export interface ReferenceAsset {
   tags?: string[];
   sourceType?: string;
   url?: string;
+  storageKey?: string | null;
+  thumbnailUrl?: string | null;
+  status?: string;
+  scanStatus?: string;
+  transcodeStatus?: string;
+  processingProgress?: number | null;
+  failureCode?: string | null;
+  failureMessage?: string | null;
 }
 
 export interface EntityAsset {
