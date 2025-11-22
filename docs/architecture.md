@@ -5,7 +5,7 @@
 - `src/lib` holds shared server and client utilities: marketing content loaders, persistence clients, rate limiting, orchestration, realtime helpers, and observability wrappers.
 - `src/components` provides UI primitives and feature-specific components used across routes.
 - `src/data` stores the local marketing content fallbacks (landing hero, FAQ feature lists, workflow stages) used when Supabase is unavailable.
-- `supabase` contains SQL migrations for durable tables (access requests, marketing content revisions, exports, embeddings, onboarding) that mirror the runtime expectations in `src/lib/db`.
+- `docs/supabase` contains SQL migrations for durable tables (access requests, marketing content revisions, projects, script docs, exports, embeddings, onboarding) that mirror the runtime expectations in `src/lib/db`.
 - `docs` captures design notes and runbooks; this file anchors the architecture map.
 - Root config: `package.json` defines dev/test scripts, `next.config.mjs` carries App Router settings, and Tailwind/TypeScript configs live alongside the project root.
 
@@ -18,6 +18,19 @@
 - The marketing admin route lists landing/FAQ revisions, loads the latest draft and published versions from Supabase, and renders an editor surface so authorized users can save drafts or publish.
 - Supabase helpers manage the marketing content lifecycle: fetching published/draft revisions, listing history, saving drafts with author metadata, and archiving old published rows when promoting a revision.
 
+## Studio onboarding + persistence
+- Visiting `/studio` uses server actions to provision a Supabase-backed project and studio session if one does not already exist for the user.
+- The onboarding wizard (`onboarding-wizard.tsx`) posts slot data through `POST /api/projects` and `saveStudioSlotInputs`, and saves optional transcripts via `persistStudioTranscript` so downstream orchestration can replay inputs.
+- Auth enforcement relies on Supabase session helpers; unauthenticated visitors are redirected to the marketing surface.
+
+## Projects, script docs, and autosave
+- `src/lib/db/projects` and `src/lib/projectsApi.server.ts` wrap Supabase queries for project CRUD, script doc hydration, and autosave payloads.
+- ScriptDoc autosaves post to `/api/projects/{id}/script-doc/autosave`, persisting JSON snapshots keyed to project IDs alongside version numbers.
+
+## Export queue and delivery
+- `/api/exports` queues Supabase-backed export jobs after validating project membership; queued jobs reference stored script doc payloads and optional email delivery targets.
+- Export job polling (`GET /api/exports/[jobId]`) and download endpoints use Supabase records to report status and serve signed download links when storage is configured.
+
 ## Access requests & notifications
 - The `/api/request-access` endpoint accepts form submissions, normalizes client context, enforces basic validation, and stores requests.
 - Persistence first targets Supabase (customizable table name) and falls back to a JSON file store to avoid data loss when credentials are absent. The handler also triggers notification hooks for downstream alerts.
@@ -27,7 +40,7 @@
 - Rate limiting uses Upstash Redis when credentials exist and falls back to an in-memory bucket to keep local development simple.
 
 ## External services and how to run them
-- **Supabase**: Required for durable marketing content and access-request storage. Apply the SQL in `supabase/migrations/` (or the convenience scripts in `docs/supabase/*.sql`) to your project, and provide `SUPABASE_URL` plus a service key. The app will automatically fall back to file-based storage when Supabase is not configured.
+- **Supabase**: Required for durable marketing content and access-request storage. Apply the SQL in `docs/supabase/*.sql` to your project, and provide `SUPABASE_URL` plus a service key. The app will automatically fall back to file-based storage when Supabase is not configured.
 - **Upstash Redis (optional)**: Set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to enable distributed rate limiting; otherwise in-memory limits are used.
 - **OpenAI / orchestration**: Set `OPENAI_API_KEY` (and optionally `OPENAI_REALTIME_MODEL`/`OPENAI_REALTIME_VOICE`) for direct realtime sessions. Provide `ORCHESTRATION_BASE_URL` and `ORCHESTRATION_API_KEY` to delegate session creation to an external orchestrator.
 - **Local dev commands**: Use `npm run dev` for the Next.js server, `npm run lint`/`npm run test:unit`/`npm run type-check` for checks, and `npm run test:e2e` for Playwright runs.
