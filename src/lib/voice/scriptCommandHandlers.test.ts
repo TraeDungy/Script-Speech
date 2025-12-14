@@ -4,6 +4,7 @@
  * F013: Voice command: New Character
  * F014: Voice command: Delete
  * F015: Voice command: Undo/Redo
+ * F016: Voice command: Save
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -15,6 +16,7 @@ import {
   handleDeleteCommand,
   handleUndoCommand,
   handleRedoCommand,
+  handleSaveCommand,
   createScriptCommandHandlers,
   type ScriptCommandHandlerOptions,
 } from "./scriptCommandHandlers";
@@ -624,6 +626,65 @@ describe("scriptCommandHandlers", () => {
     });
   });
 
+  describe("handleSaveCommand", () => {
+    let mockOptions: ScriptCommandHandlerOptions;
+    let mockCommand: VoiceCommand;
+
+    beforeEach(() => {
+      mockOptions = {
+        onSave: vi.fn(),
+        onConfirmation: vi.fn(),
+        onAudioFeedback: vi.fn(),
+      };
+
+      mockCommand = {
+        type: "save",
+        rawText: "save",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+    });
+
+    it("calls onSave callback", () => {
+      handleSaveCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onSave).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows confirmation with timestamp", () => {
+      handleSaveCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onConfirmation).toHaveBeenCalledTimes(1);
+      const confirmationMessage = (mockOptions.onConfirmation as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(confirmationMessage).toMatch(/Script saved at \d{1,2}:\d{2}:\d{2}/);
+    });
+
+    it("provides success audio feedback", () => {
+      handleSaveCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledTimes(1);
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledWith("success");
+    });
+
+    it("works without any callbacks", () => {
+      expect(() => {
+        handleSaveCommand(mockCommand);
+      }).not.toThrow();
+    });
+
+    it("works with partial callbacks", () => {
+      const partialOptions: ScriptCommandHandlerOptions = {
+        onSave: vi.fn(),
+      };
+
+      handleSaveCommand(mockCommand, partialOptions);
+
+      expect(partialOptions.onSave).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("F014 Acceptance Criteria", () => {
     it("removes most recent element via callback", () => {
       const mockOptions: ScriptCommandHandlerOptions = {
@@ -859,6 +920,96 @@ describe("scriptCommandHandlers", () => {
       handlers.redo(mockCommand);
 
       expect(mockOptions.onRedo).toHaveBeenCalledTimes(1);
+    });
+
+    it("save handler works when called", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onSave: vi.fn(),
+      };
+
+      const handlers = createScriptCommandHandlers(mockOptions);
+      const mockCommand: VoiceCommand = {
+        type: "save",
+        rawText: "save",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handlers.save(mockCommand);
+
+      expect(mockOptions.onSave).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("F016 Acceptance Criteria", () => {
+    it("triggers save operation via callback", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onSave: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "save",
+        rawText: "save",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleSaveCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onSave).toHaveBeenCalled();
+    });
+
+    it("shows confirmation message with timestamp", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onConfirmation: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "save",
+        rawText: "save this",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleSaveCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onConfirmation).toHaveBeenCalled();
+      const confirmationMessage = (mockOptions.onConfirmation as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+      expect(confirmationMessage).toContain("Script saved at");
+    });
+
+    it("updates timestamp on each save", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onConfirmation: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "save",
+        rawText: "save",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      // First save
+      handleSaveCommand(mockCommand, mockOptions);
+      const firstMessage = (mockOptions.onConfirmation as ReturnType<typeof vi.fn>).mock
+        .calls[0][0];
+
+      // Second save (should have different timestamp)
+      handleSaveCommand(mockCommand, mockOptions);
+      const secondMessage = (mockOptions.onConfirmation as ReturnType<typeof vi.fn>).mock
+        .calls[1][0];
+
+      expect(firstMessage).toContain("Script saved at");
+      expect(secondMessage).toContain("Script saved at");
+      // Both should be valid timestamp formats
+      expect(firstMessage).toMatch(/\d{1,2}:\d{2}:\d{2}/);
+      expect(secondMessage).toMatch(/\d{1,2}:\d{2}:\d{2}/);
     });
   });
 });

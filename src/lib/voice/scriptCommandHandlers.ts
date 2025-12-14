@@ -4,6 +4,7 @@
  * F013: Voice command: New Character
  * F014: Voice command: Delete
  * F015: Voice command: Undo/Redo
+ * F016: Voice command: Save
  *
  * These handlers integrate voice commands with the Script-Speech document store
  */
@@ -108,6 +109,12 @@ export interface ScriptCommandHandlerOptions {
    * @param type - Type of audio feedback (success, error, info)
    */
   onAudioFeedback?: (type: "success" | "error" | "info") => void;
+
+  /**
+   * Callback for save operation
+   * Should trigger document save
+   */
+  onSave?: () => void;
 }
 
 /**
@@ -248,6 +255,31 @@ export function handleRedoCommand(
 }
 
 /**
+ * Handler for "save" voice command
+ * F016: Triggers save operation, shows confirmation, updates timestamp
+ */
+export function handleSaveCommand(
+  command: VoiceCommand,
+  options: ScriptCommandHandlerOptions = {},
+): void {
+  // Trigger save operation
+  if (options.onSave) {
+    options.onSave();
+  }
+
+  // Show confirmation with timestamp
+  if (options.onConfirmation) {
+    const timestamp = new Date().toLocaleTimeString();
+    options.onConfirmation(`Script saved at ${timestamp}`);
+  }
+
+  // Provide audio feedback
+  if (options.onAudioFeedback) {
+    options.onAudioFeedback("success");
+  }
+}
+
+/**
  * Factory function to create script command handlers bound to specific options
  */
 export function createScriptCommandHandlers(options: ScriptCommandHandlerOptions = {}) {
@@ -257,5 +289,6 @@ export function createScriptCommandHandlers(options: ScriptCommandHandlerOptions
     delete: (command: VoiceCommand) => handleDeleteCommand(command, options),
     undo: (command: VoiceCommand) => handleUndoCommand(command, options),
     redo: (command: VoiceCommand) => handleRedoCommand(command, options),
+    save: (command: VoiceCommand) => handleSaveCommand(command, options),
   };
 }
