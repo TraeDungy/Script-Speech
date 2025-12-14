@@ -36,3 +36,45 @@ export interface TranscriptionConfig {
   interimResults?: boolean;
   maxAlternatives?: number;
 }
+
+/**
+ * Speaker diarization types
+ * F008: Speaker diarization
+ */
+
+export interface Speaker {
+  id: string;
+  label: string;
+  confidence: number;
+  voiceProfile?: VoiceProfile;
+  characterName?: string;
+}
+
+export interface VoiceProfile {
+  pitch: number;
+  tempo: number;
+  energy: number;
+  embedding?: number[];
+}
+
+export interface SpeakerSegment {
+  speakerId: string;
+  startTime: number;
+  endTime: number;
+  text?: string;
+  confidence: number;
+}
+
+export interface DiarizationResult {
+  speakers: Speaker[];
+  segments: SpeakerSegment[];
+  activeSpeaker?: string;
+  timestamp: number;
+}
+
+export interface DiarizationConfig {
+  minSpeakers?: number;
+  maxSpeakers?: number;
+  enableVoiceProfiles?: boolean;
+  segmentationThreshold?: number;
+}
