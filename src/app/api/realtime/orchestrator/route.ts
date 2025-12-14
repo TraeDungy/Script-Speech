@@ -39,6 +39,8 @@ export async function POST(request: NextRequest) {
         requestedSessionId: typeof data.sessionId === "string" ? data.sessionId : undefined,
       });
 
+      console.log("[DEBUG] Orchestrator session result:", JSON.stringify(result, null, 2));
+
       return NextResponse.json(result, {
         status: 200,
         headers: {

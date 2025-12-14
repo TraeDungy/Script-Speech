@@ -48,6 +48,8 @@ async function createRealtimeSession(body: Record<string, unknown>) {
     throw new RealtimeOrchestratorError("OPENAI_API_KEY is not configured", 500);
   }
 
+  console.log("[DEBUG] Creating realtime session with body:", JSON.stringify(body, null, 2));
+
   const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
     method: "POST",
     headers: {
@@ -66,7 +68,14 @@ async function createRealtimeSession(body: Record<string, unknown>) {
     throw new RealtimeOrchestratorError(message, response.status === 401 ? 401 : 502);
   }
 
-  return payload as Record<string, unknown>;
+  // Add the WebRTC URL that the client expects
+  // OpenAI's newer API doesn't include this in the response, but the client requires it
+  // The WebRTC connection endpoint is separate from the session creation endpoint
+  const model = typeof body.model === "string" ? body.model : "gpt-4o-realtime-preview-2024-12-10";
+  const sessionPayload = payload as Record<string, unknown>;
+  sessionPayload.url = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
+
+  return sessionPayload;
 }
 
 function normalizeSessionMetadata(
@@ -153,8 +162,48 @@ export class RealtimeOrchestratorService {
           const session = await createRealtimeSession({
             model: process.env.OPENAI_REALTIME_MODEL ?? "gpt-4o-realtime-preview-2024-12-10",
             voice: process.env.OPENAI_REALTIME_VOICE ?? "verse",
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.85,  // Much less sensitive - prevents interrupting AI responses (0.5 default, 0.0-1.0 range)
+              prefix_padding_ms: 700,  // More padding before detecting speech start
+              silence_duration_ms: 3000,  // Wait 3 seconds for silence before considering turn complete
+            },
             instructions:
-              "Use update_project_state to synchronize ScriptDoc patches and log_transcript_turn to persist transcript updates.",
+              `You are a screenplay development assistant. Your CRITICAL JOB is to extract story elements from conversation and call update_project_state to populate the canvas.
+
+**MANDATORY BEHAVIOR:**
+- IMMEDIATELY call update_project_state when you hear ANY character name, location, story beat, or scene
+- DO NOT just acknowledge - EXTRACT AND SAVE IT
+- If user says "James is a detective", you MUST call update_project_state with a character patch for James
+- If user describes any story detail, you MUST extract it and call the tool
+
+**Tool Calling is REQUIRED:**
+Every time you identify:
+- A character name → IMMEDIATELY call update_project_state with characters array
+- A location/setting → IMMEDIATELY call update_project_state with locations array
+- A story beat → IMMEDIATELY call update_project_state with beats array (NOT acts!)
+- A scene → IMMEDIATELY call update_project_state with scenes array
+
+**CRITICAL FIELD REQUIREMENTS:**
+- Characters need: id, name (description and goal are optional)
+- Locations need: id, name, type ("interior", "exterior", or "mixed")
+- Beats need: id, title, summary (NOT description! - order is auto-assigned)
+- Scenes need: id, title, summary, slugline, elements array (order is auto-assigned)
+
+**Example Flow:**
+User: "James is a detective"
+You: [CALL update_project_state with {"patch": {"characters": [{"id": "char-james-1", "name": "James", "description": "A detective"}]}, "reason": "Added James character"}]
+You: "Got it! James the detective is now on your canvas. Tell me more about him - what's he investigating?"
+
+User: "He's looking for his missing daughter in an abandoned warehouse"
+You: [CALL update_project_state with {"patch": {"characters": [{"id": "char-james-1", "goal": "Find his missing daughter"}], "locations": [{"id": "loc-warehouse-1", "name": "Abandoned Warehouse", "type": "interior", "description": "A dark, forgotten industrial space"}]}, "reason": "Updated James goal and added warehouse location"}]
+You: "Perfect! I've added the warehouse and updated James's goal. What happens when he gets there?"
+
+User: "The story is about Red Rebel - James uncovers the truth about his niece"
+You: [CALL update_project_state with {"patch": {"beats": [{"id": "beat-1", "title": "Red Rebel", "summary": "James's journey to uncover the truth about his niece's disappearance"}]}, "reason": "Added main story beat"}]
+You: "Great! I've added the main story beat 'Red Rebel'. Tell me more about what James discovers."
+
+**DO NOT FORGET TO CALL THE TOOL.** The canvas will be empty if you don't call update_project_state.`,
             tools: TOOL_DEFINITIONS.map((tool) => ({
               type: "function",
               name: tool.name,

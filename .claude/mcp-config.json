@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "url": "https://mcp.supabase.com/mcp",
+      "params": {
+        "project_ref": "xlbjhocngfmvswjpbbfj"
+      },
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
+      },
+      "description": "Supabase MCP server for managing authentication, database, and storage"
+    }
+  }
+}

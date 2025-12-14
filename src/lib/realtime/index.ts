@@ -207,6 +207,13 @@ export class RealtimeClient {
   private isRecovering = false;
   private manualDisconnect = false;
 
+  // Audio processing via data channel (new architecture)
+  private audioContext: AudioContext | null = null;
+  private audioWorkletNode: AudioWorkletNode | null = null;
+  private audioSourceNode: MediaStreamAudioSourceNode | null = null;
+  private audioPlaybackQueue: AudioBuffer[] = [];
+  private isPlayingAudio = false;
+
   constructor(options?: RealtimeClientOptions) {
     this.tokenEndpoint = options?.tokenEndpoint ?? "/api/realtime/orchestrator";
     this.iceServers = options?.iceServers;
@@ -264,7 +271,10 @@ export class RealtimeClient {
         this.remoteAudioStream = stream;
         if (this.remoteAudioElement) {
           this.remoteAudioElement.srcObject = stream;
-          void this.remoteAudioElement.play?.();
+          // Try to play audio, but don't throw if autoplay is blocked by browser
+          this.remoteAudioElement.play?.().catch(() => {
+            // Autoplay blocked - audio will play after user interaction (e.g., clicking mic button)
+          });
         }
       }
     });
@@ -283,14 +293,37 @@ export class RealtimeClient {
         // Keep raw payload when JSON parsing fails.
       }
 
+      // Debug logging for all data channel messages
+      if (typeof payload === "object" && payload !== null && "type" in payload) {
+        const msgType = payload.type;
+
+        // Always log message type
+        console.log("[Realtime] Message type:", msgType);
+
+        // Log full payload for important messages
+        if (typeof msgType === "string" &&
+            (msgType.includes("function") ||
+             msgType.includes("tool") ||
+             msgType.includes("response") ||
+             msgType.includes("conversation") ||
+             msgType.includes("input_audio")||
+             msgType.includes("transcript"))) {
+          console.log("[Realtime] Full payload:", JSON.stringify(payload, null, 2));
+        }
+      } else {
+        console.log("[Realtime] Data channel message:", payload);
+      }
+
       const acknowledgement = parseToolAcknowledgement(payload);
       if (acknowledgement) {
+        console.log("[Realtime] Tool acknowledgement received:", acknowledgement);
         this.resolveToolAcknowledgement(acknowledgement);
         return;
       }
 
       const invocation = parseToolInvocationPayload(payload);
       if (invocation) {
+        console.log("[Realtime] Tool invocation received:", invocation);
         if (this.sessionMetadata?.sessionId) {
           invocation.sessionId = this.sessionMetadata.sessionId;
         }
@@ -300,6 +333,20 @@ export class RealtimeClient {
         this.events.emit({ type: "tool-invocation", invocation });
         void this.handleToolInvocation(invocation);
         return;
+      }
+
+      // Handle incoming audio from OpenAI (response.audio.delta events)
+      if (typeof payload === "object" && payload !== null && "type" in payload) {
+        const msgType = payload.type;
+
+        if (msgType === "response.audio.delta" || msgType === "audio.delta") {
+          // OpenAI sends audio as base64-encoded PCM16
+          const audioData = (payload as { delta?: string }).delta;
+          if (typeof audioData === "string") {
+            void this.handleIncomingAudio(audioData);
+          }
+          return;
+        }
       }
 
       this.events.emit({ type: "realtime-event", payload, raw: event.data });
@@ -384,18 +431,24 @@ export class RealtimeClient {
       this.pendingToolRequests.clear();
     }
 
-    if (options?.preserveMicrophone && this.microphoneStream) {
-      for (const sender of this.microphoneSenders) {
-        try {
-          this.connection?.removeTrack(sender);
-        } catch {
-          // ignore failures when the sender has already been removed
-        }
-      }
-      this.microphoneSenders.clear();
-    } else {
+    // Stop microphone and cleanup audio processing
+    if (!options?.preserveMicrophone) {
       this.stopMicrophone();
     }
+
+    // Cleanup AudioContext
+    if (!options?.preserveMicrophone && this.audioContext) {
+      try {
+        void this.audioContext.close();
+      } catch {
+        // ignore
+      }
+      this.audioContext = null;
+    }
+
+    // Clear audio playback queue
+    this.audioPlaybackQueue = [];
+    this.isPlayingAudio = false;
 
     if (!options?.preserveAudioElement && this.remoteAudioElement) {
       this.remoteAudioElement.srcObject = null;
@@ -411,7 +464,10 @@ export class RealtimeClient {
 
     if (this.remoteAudioStream) {
       this.remoteAudioElement.srcObject = this.remoteAudioStream;
-      void this.remoteAudioElement.play?.();
+      // Try to play audio, but don't throw if autoplay is blocked by browser
+      this.remoteAudioElement.play?.().catch(() => {
+        // Autoplay blocked - audio will play after user interaction (e.g., clicking mic button)
+      });
     }
   }
 
@@ -420,10 +476,17 @@ export class RealtimeClient {
       throw new Error("Realtime connection has not been established yet");
     }
 
-    if (this.microphoneStream) {
+    if (!this.dataChannel || this.dataChannel.readyState !== "open") {
+      throw new Error("Data channel not open - cannot send audio");
+    }
+
+    if (this.microphoneStream && this.audioWorkletNode) {
       return this.microphoneStream;
     }
 
+    console.log("[Realtime] Starting microphone with AudioWorklet pipeline...");
+
+    // Get microphone stream
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1,
@@ -435,33 +498,85 @@ export class RealtimeClient {
 
     this.microphoneStream = stream;
 
-    for (const track of stream.getTracks()) {
-      const sender = this.connection.addTrack(track, stream);
-      this.microphoneSenders.add(sender);
+    // Initialize AudioContext
+    if (!this.audioContext) {
+      this.audioContext = new AudioContext();
+      console.log("[Realtime] AudioContext created, sample rate:", this.audioContext.sampleRate);
+    }
+
+    // Resume AudioContext if suspended (browser autoplay policy)
+    if (this.audioContext.state === "suspended") {
+      await this.audioContext.resume();
+    }
+
+    try {
+      // Load AudioWorklet module
+      await this.audioContext.audioWorklet.addModule("/audio-processor.js");
+      console.log("[Realtime] AudioWorklet module loaded successfully");
+
+      // Create AudioWorklet node
+      this.audioWorkletNode = new AudioWorkletNode(
+        this.audioContext,
+        "realtime-audio-processor"
+      );
+
+      // Handle audio chunks from AudioWorklet
+      this.audioWorkletNode.port.onmessage = (event) => {
+        const { type, audio } = event.data;
+
+        if (type === "audio-chunk" && audio instanceof Int16Array) {
+          // Convert PCM16 to base64
+          const base64Audio = this.pcm16ToBase64(audio);
+
+          // Send via data channel to OpenAI
+          this.sendAudioToOpenAI(base64Audio);
+        }
+      };
+
+      // Connect microphone → AudioWorklet
+      this.audioSourceNode = this.audioContext.createMediaStreamSource(stream);
+      this.audioSourceNode.connect(this.audioWorkletNode);
+
+      console.log("[Realtime] Audio pipeline connected: Microphone → AudioWorklet → Data Channel");
+    } catch (error) {
+      console.error("[Realtime] Failed to setup AudioWorklet:", error);
+      throw new Error(`AudioWorklet setup failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return stream;
   }
 
   stopMicrophone() {
+    console.log("[Realtime] Stopping microphone...");
+
+    // Disconnect AudioWorklet
+    if (this.audioSourceNode) {
+      try {
+        this.audioSourceNode.disconnect();
+      } catch {
+        // Ignore if already disconnected
+      }
+      this.audioSourceNode = null;
+    }
+
+    if (this.audioWorkletNode) {
+      try {
+        this.audioWorkletNode.disconnect();
+      } catch {
+        // Ignore if already disconnected
+      }
+      this.audioWorkletNode = null;
+    }
+
+    // Stop microphone tracks
     if (this.microphoneStream) {
       for (const track of this.microphoneStream.getTracks()) {
         track.stop();
       }
     }
 
-    if (this.connection) {
-      for (const sender of this.microphoneSenders) {
-        try {
-          this.connection.removeTrack(sender);
-        } catch {
-          // ignore failures when the sender has already been removed
-        }
-      }
-    }
-
-    this.microphoneSenders.clear();
     this.microphoneStream = null;
+    console.log("[Realtime] Microphone stopped");
   }
 
   getSessionMetadata(): OrchestratorSessionMetadata | null {
@@ -534,11 +649,52 @@ export class RealtimeClient {
     try {
       const acknowledgement = await this.dispatchToolInvocation(invocation, metadata);
       this.resolveToolAcknowledgement(acknowledgement);
+
+      // CRITICAL FIX: Send function result back to OpenAI via data channel
+      // OpenAI Realtime API requires function_call_output to complete the tool cycle
+      if (this.dataChannel && this.dataChannel.readyState === "open") {
+        const functionOutput = {
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: invocation.callId,
+            output: JSON.stringify({
+              status: acknowledgement.status,
+              result: acknowledgement.projectStatePatch || acknowledgement.transcriptTurn || { success: true },
+            }),
+          },
+        };
+
+        console.log("[Realtime] Sending function result back to OpenAI:", functionOutput);
+        this.dataChannel.send(JSON.stringify(functionOutput));
+      } else {
+        console.warn("[Realtime] Data channel not open, cannot send function result to OpenAI");
+      }
+
       return acknowledgement;
     } catch (error) {
       this.pendingToolRequests.delete(invocation.callId);
       const err = error instanceof Error ? error : new Error(String(error));
       this.events.emit({ type: "tool-error", invocation, error: err });
+
+      // Send error result back to OpenAI
+      if (this.dataChannel && this.dataChannel.readyState === "open") {
+        const errorOutput = {
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: invocation.callId,
+            output: JSON.stringify({
+              status: "error",
+              error: err.message,
+            }),
+          },
+        };
+
+        console.log("[Realtime] Sending error result back to OpenAI:", errorOutput);
+        this.dataChannel.send(JSON.stringify(errorOutput));
+      }
+
       throw err;
     }
   }
@@ -729,6 +885,135 @@ export class RealtimeClient {
     } finally {
       this.isRecovering = false;
     }
+  }
+
+  /**
+   * Convert PCM16 audio (Int16Array) to base64 string
+   */
+  private pcm16ToBase64(pcm16: Int16Array): string {
+    // Convert Int16Array to Uint8Array (little-endian)
+    const uint8Array = new Uint8Array(pcm16.buffer);
+
+    // Convert to base64 using browser's btoa
+    let binary = '';
+    for (let i = 0; i < uint8Array.length; i++) {
+      binary += String.fromCharCode(uint8Array[i]);
+    }
+    return btoa(binary);
+  }
+
+  /**
+   * Convert base64 string to PCM16 audio (Int16Array)
+   */
+  private base64ToPCM16(base64: string): Int16Array {
+    // Decode base64 to binary string
+    const binary = atob(base64);
+
+    // Convert to Uint8Array
+    const uint8Array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      uint8Array[i] = binary.charCodeAt(i);
+    }
+
+    // Create Int16Array view of the buffer
+    return new Int16Array(uint8Array.buffer);
+  }
+
+  /**
+   * Send audio chunk to OpenAI via data channel
+   */
+  private sendAudioToOpenAI(base64Audio: string): void {
+    if (!this.dataChannel || this.dataChannel.readyState !== "open") {
+      console.warn("[Realtime] Data channel not open, cannot send audio");
+      return;
+    }
+
+    const audioEvent = {
+      type: "input_audio_buffer.append",
+      audio: base64Audio,
+    };
+
+    try {
+      this.dataChannel.send(JSON.stringify(audioEvent));
+      // Log periodically (every 50 chunks = ~10 seconds at 200ms chunks)
+      if (Math.random() < 0.02) {
+        console.log("[Realtime] Sending audio to OpenAI (sampling log)");
+      }
+    } catch (error) {
+      console.error("[Realtime] Failed to send audio chunk:", error);
+    }
+  }
+
+  /**
+   * Handle incoming audio from OpenAI (response.audio.delta events)
+   */
+  private async handleIncomingAudio(base64Audio: string): Promise<void> {
+    if (!this.audioContext) {
+      console.warn("[Realtime] AudioContext not initialized, cannot play audio");
+      return;
+    }
+
+    try {
+      // Decode base64 to PCM16
+      const pcm16 = this.base64ToPCM16(base64Audio);
+
+      // Convert PCM16 to Float32 for Web Audio API
+      const float32 = new Float32Array(pcm16.length);
+      for (let i = 0; i < pcm16.length; i++) {
+        // Convert Int16 (-32768 to 32767) to Float32 (-1.0 to 1.0)
+        float32[i] = pcm16[i] / (pcm16[i] < 0 ? 32768 : 32767);
+      }
+
+      // Create AudioBuffer (24kHz mono from OpenAI)
+      const audioBuffer = this.audioContext.createBuffer(
+        1, // mono
+        float32.length,
+        24000 // OpenAI sends 24kHz audio
+      );
+
+      // Copy data to AudioBuffer
+      audioBuffer.copyToChannel(float32, 0);
+
+      // Add to playback queue
+      this.audioPlaybackQueue.push(audioBuffer);
+
+      // Start playback if not already playing
+      if (!this.isPlayingAudio) {
+        void this.playAudioQueue();
+      }
+    } catch (error) {
+      console.error("[Realtime] Failed to process incoming audio:", error);
+    }
+  }
+
+  /**
+   * Play queued audio buffers continuously without gaps
+   */
+  private async playAudioQueue(): Promise<void> {
+    if (!this.audioContext || this.isPlayingAudio) {
+      return;
+    }
+
+    this.isPlayingAudio = true;
+
+    while (this.audioPlaybackQueue.length > 0) {
+      const audioBuffer = this.audioPlaybackQueue.shift();
+      if (!audioBuffer) continue;
+
+      // Create buffer source
+      const source = this.audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(this.audioContext.destination);
+
+      // Play audio
+      source.start();
+
+      // Wait for audio to finish playing
+      const duration = audioBuffer.duration * 1000; // Convert to ms
+      await new Promise(resolve => setTimeout(resolve, duration));
+    }
+
+    this.isPlayingAudio = false;
   }
 }
 

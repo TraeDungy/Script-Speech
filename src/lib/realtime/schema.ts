@@ -60,12 +60,65 @@ export interface OrchestratorSessionMetadata {
 export const TOOL_DEFINITIONS: ToolSchemaDefinition[] = [
   {
     name: "update_project_state",
-    description: "Apply a partial update to the ScriptDoc store for the active project.",
+    description: `Extract and add story elements to the screenplay canvas. Call this IMMEDIATELY when the user mentions characters, locations, story beats, or scenes.
+
+CRITICAL: You MUST use this exact JSON structure matching the ScriptDoc schema:
+{
+  "patch": {
+    "characters": [{id: "char-1", name: "...", description: "...", goal: "..."}],
+    "locations": [{id: "loc-1", name: "...", type: "interior", description: "..."}],
+    "beats": [{id: "beat-1", order: 0, title: "...", summary: "..."}],
+    "scenes": [{id: "scene-1", order: 0, title: "...", summary: "...", slugline: {setting: "INT", location: "...", timeOfDay: "..."}, elements: []}]
+  },
+  "reason": "Brief explanation of what you added"
+}
+
+REQUIRED FIELDS (never skip these):
+- characters: id, name (description and goal are optional)
+- locations: id, name, type (must be "interior", "exterior", or "mixed")
+- beats: id, title, summary (order will be auto-assigned)
+- scenes: id, title, summary, slugline (object), elements (array) (order will be auto-assigned)
+
+The "patch" object is REQUIRED and must contain arrays (characters, locations, beats, or scenes).
+Do NOT put arrays at the top level - they MUST be inside the "patch" object.
+IMPORTANT: Use "beats" for story structure, NOT "acts". Use "summary" NOT "description" for beats.
+
+Example for character Marcus:
+{
+  "patch": {
+    "characters": [{
+      "id": "char-marcus-001",
+      "name": "Marcus",
+      "description": "A dark and scary figure, taking on the role of the Big Bad Wolf",
+      "goal": "Unknown dark motivations"
+    }]
+  },
+  "reason": "Added Marcus character from user description"
+}
+
+Example for story beat:
+{
+  "patch": {
+    "beats": [{
+      "id": "beat-001",
+      "title": "Red Rebel",
+      "summary": "James's journey to uncover the truth about his niece's disappearance."
+    }]
+  },
+  "reason": "Added the main story beat for 'Red Rebel'"
+}`,
     schema: {
       type: "object",
       properties: {
-        patch: { type: "object", additionalProperties: true },
-        reason: { type: "string" },
+        patch: {
+          type: "object",
+          description: "REQUIRED object containing story elements arrays (characters, locations, beats, acts)",
+          additionalProperties: true
+        },
+        reason: {
+          type: "string",
+          description: "Brief explanation of what story elements were added"
+        },
       },
       required: ["patch"],
       additionalProperties: false,
@@ -73,7 +126,7 @@ export const TOOL_DEFINITIONS: ToolSchemaDefinition[] = [
   },
   {
     name: "log_transcript_turn",
-    description: "Persist a transcript turn to Supabase for replay and analysis.",
+    description: "Persist a transcript turn to Supabase for replay and analysis. Call this for important conversation turns.",
     schema: {
       type: "object",
       properties: {

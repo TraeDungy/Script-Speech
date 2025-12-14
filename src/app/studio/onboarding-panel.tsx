@@ -83,10 +83,14 @@ export function StudioOnboardingPanel({
   const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
   const [liveTranscript, setLiveTranscript] = useState("");
   const [micError, setMicError] = useState<string | null>(null);
+  const [audioLevel, setAudioLevel] = useState(0);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const transcriptRef = useRef<string>("");
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!session) {
@@ -144,6 +148,20 @@ export function StudioOnboardingPanel({
       }
       streamRef.current = null;
     }
+
+    // Stop audio visualizer
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    analyserRef.current = null;
+    setAudioLevel(0);
   }, []);
 
   useEffect(() => () => stopStream(), [stopStream]);
@@ -256,6 +274,32 @@ export function StudioOnboardingPanel({
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+
+      // Set up audio visualizer
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.8;
+      source.connect(analyser);
+
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      const updateAudioLevel = () => {
+        if (!analyserRef.current) return;
+
+        analyserRef.current.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+        const normalized = Math.min(average / 128, 1); // Normalize to 0-1
+        setAudioLevel(normalized);
+
+        animationFrameRef.current = requestAnimationFrame(updateAudioLevel);
+      };
+
+      updateAudioLevel();
 
       const RecognitionConstructor = getRecognitionConstructor();
       if (!RecognitionConstructor) {
@@ -426,6 +470,30 @@ export function StudioOnboardingPanel({
                 Stop
               </button>
             </div>
+            {isRecording && (
+              <div className="mt-3 flex items-center gap-2">
+                <span className="text-xs text-zinc-500">Audio Level:</span>
+                <div className="flex-1 h-2 bg-black/40 rounded-full border border-white/10 overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-100"
+                    style={{ width: `${audioLevel * 100}%` }}
+                  />
+                </div>
+                <div className="flex gap-1">
+                  {[...Array(5)].map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-1 rounded-full transition-all duration-100 ${
+                        audioLevel * 5 > i ? "bg-purple-500" : "bg-white/10"
+                      }`}
+                      style={{
+                        height: `${8 + i * 4}px`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
             {voiceStatus && <p className="mt-2 text-xs text-zinc-400">{voiceStatus}</p>}
             {micError && <p className="mt-2 text-xs text-rose-300">{micError}</p>}
             {liveTranscript && (

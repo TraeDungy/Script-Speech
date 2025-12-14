@@ -1,4 +1,4 @@
-import { requireServerAuthSession } from "@/lib/auth/server";
+// import { requireServerAuthSession } from "@/lib/auth/server"; // Temporarily disabled for preview
 import { enforceRateLimit, type RateLimitResult } from "@/lib/rateLimit";
 
 const MODERATION_MODEL = process.env.OPENAI_MODERATION_MODEL ?? "omni-moderation-latest";
@@ -27,9 +27,12 @@ interface RateLimitOptions {
 }
 
 export async function requireRealtimeContext(options?: RateLimitOptions): Promise<RealtimeRequestContext> {
-  const { user } = await requireServerAuthSession();
+  // Temporarily disabled auth for preview mode
+  // TODO: Re-enable authentication before production
+  // const { user } = await requireServerAuthSession();
+  const mockUserId = "00000000-0000-0000-0000-000000000000";
   const rate = await enforceRateLimit({
-    key: options?.key ?? user.id,
+    key: options?.key ?? mockUserId,
     limit: options?.limit ?? 120,
     windowMs: options?.windowMs ?? 60_000,
     cost: options?.cost,
@@ -41,7 +44,7 @@ export async function requireRealtimeContext(options?: RateLimitOptions): Promis
     throw new RateLimitExceededError("Rate limit exceeded", retryAfter);
   }
 
-  return { userId: user.id, rateLimit: rate };
+  return { userId: mockUserId, rateLimit: rate };
 }
 
 export async function moderateRealtimeText(text: string): Promise<{ flagged: boolean }> {

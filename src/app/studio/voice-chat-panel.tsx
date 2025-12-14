@@ -379,6 +379,7 @@ export function VoiceChatProvider({ children }: { children: ReactNode }) {
       }
 
       if (event.type === "session-metadata") {
+        console.log("[VoiceChat] Received session-metadata event:", event.metadata);
         const previousSessionId = sessionMetadataRef.current?.sessionId;
         sessionMetadataRef.current = event.metadata ?? null;
 
@@ -387,6 +388,7 @@ export function VoiceChatProvider({ children }: { children: ReactNode }) {
         }
 
         if (event.metadata.projectStatePatch) {
+          console.log("[VoiceChat] Applying patch from session-metadata:", event.metadata.projectStatePatch);
           applyScriptDocPatch(event.metadata.projectStatePatch);
         }
 
@@ -412,8 +414,12 @@ export function VoiceChatProvider({ children }: { children: ReactNode }) {
       }
 
       if (event.type === "tool-acknowledged") {
+        console.log("[VoiceChat] Received tool-acknowledged event:", event.acknowledgement);
         if (event.acknowledgement.projectStatePatch) {
+          console.log("[VoiceChat] Applying patch from tool-acknowledged:", event.acknowledgement.projectStatePatch);
           applyScriptDocPatch(event.acknowledgement.projectStatePatch);
+        } else {
+          console.warn("[VoiceChat] No projectStatePatch in acknowledgement!");
         }
 
         if (event.acknowledgement.transcriptTurn) {
@@ -538,6 +544,14 @@ export function VoiceChatProvider({ children }: { children: ReactNode }) {
       await client.startMicrophone();
       setIsMicActive(true);
       setError(null);
+
+      // Attempt to play remote audio now that we have user interaction
+      // This overcomes browser autoplay restrictions
+      if (audioRef.current?.srcObject) {
+        audioRef.current.play().catch(() => {
+          // Ignore autoplay errors - audio will play when AI responds
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Microphone access was denied");
       setIsMicActive(false);

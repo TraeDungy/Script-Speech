@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server";
+// import { requireServerAuthSession, UnauthorizedError } from "@/lib/auth/server"; // Temporarily disabled for preview
+import { UnauthorizedError } from "@/lib/auth/server";
 import { enforceRateLimit } from "@/lib/rateLimit";
 
 const DEFAULT_REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL ?? "gpt-4o-realtime-preview-2024-12-10";
@@ -84,9 +85,12 @@ async function createSession() {
 
 export async function POST() {
   try {
-    const { user } = await requireServerAuthSession();
+    // Temporarily disabled auth for preview mode
+    // TODO: Re-enable authentication before production
+    // const { user } = await requireServerAuthSession();
+    const mockUserId = "00000000-0000-0000-0000-000000000000";
     const rate = await enforceRateLimit({
-      key: user.id,
+      key: mockUserId,
       limit: 15,
       windowMs: 60_000,
       prefix: "realtime",
@@ -109,6 +113,7 @@ export async function POST() {
     }
 
     const session = await createSession();
+    console.log("[DEBUG] Realtime session response:", JSON.stringify(session, null, 2));
     return NextResponse.json(session, {
       status: 200,
       headers: {

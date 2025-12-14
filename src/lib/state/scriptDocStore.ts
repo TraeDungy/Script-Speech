@@ -380,8 +380,10 @@ export const useScriptDocStore = create<ScriptDocStore>((set, get) => ({
     });
   },
   applyPatch: (patch) => {
+    console.log("[scriptDocStore] applyPatch called with:", JSON.stringify(patch, null, 2));
     const state = get();
     const merged = mergeScriptDocPatch(state.doc, patch);
+    console.log("[scriptDocStore] Merged document:", JSON.stringify(merged, null, 2));
     set({
       doc: merged,
       past: state.past,
