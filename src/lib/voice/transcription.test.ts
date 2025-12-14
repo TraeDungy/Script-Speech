@@ -400,6 +400,24 @@ describe("getSupportedLanguages", () => {
     expect(codes).toContain("fr-FR");
     expect(codes).toContain("de-DE");
   });
+
+  it("should support English (US) as primary language (F005)", () => {
+    const languages = getSupportedLanguages();
+    const english = languages.find((lang) => lang.code === "en-US");
+
+    expect(english).toBeDefined();
+    expect(english?.name).toBe("English (US)");
+    expect(english?.code).toBe("en-US");
+  });
+
+  it("should support multiple English variants (F005)", () => {
+    const languages = getSupportedLanguages();
+    const englishVariants = languages.filter((lang) => lang.code.startsWith("en-"));
+
+    expect(englishVariants.length).toBeGreaterThanOrEqual(2);
+    expect(englishVariants.some((lang) => lang.code === "en-US")).toBe(true);
+    expect(englishVariants.some((lang) => lang.code === "en-GB")).toBe(true);
+  });
 });
 
 describe("Performance", () => {
