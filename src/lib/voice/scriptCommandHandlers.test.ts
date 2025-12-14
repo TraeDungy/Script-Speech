@@ -2,6 +2,8 @@
  * Tests for Script Command Handlers
  * F012: Voice command: New Scene
  * F013: Voice command: New Character
+ * F014: Voice command: Delete
+ * F015: Voice command: Undo/Redo
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -10,6 +12,9 @@ import {
   createDefaultCharacter,
   handleNewSceneCommand,
   handleNewCharacterCommand,
+  handleDeleteCommand,
+  handleUndoCommand,
+  handleRedoCommand,
   createScriptCommandHandlers,
   type ScriptCommandHandlerOptions,
 } from "./scriptCommandHandlers";
@@ -443,6 +448,417 @@ describe("scriptCommandHandlers", () => {
 
       expect(mockOptions.onOpenCharacterEditor).toHaveBeenCalledTimes(1);
       expect(mockOptions.onOpenCharacterEditor).toHaveBeenCalledWith(expect.any(String));
+    });
+  });
+
+  describe("handleDeleteCommand", () => {
+    let mockOptions: ScriptCommandHandlerOptions;
+    let mockCommand: VoiceCommand;
+
+    beforeEach(() => {
+      mockOptions = {
+        onDelete: vi.fn(),
+        onConfirmation: vi.fn(),
+        onAudioFeedback: vi.fn(),
+      };
+
+      mockCommand = {
+        type: "delete",
+        rawText: "delete that",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+    });
+
+    it("calls onDelete callback", () => {
+      handleDeleteCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows confirmation with undo hint", () => {
+      handleDeleteCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onConfirmation).toHaveBeenCalledTimes(1);
+      expect(mockOptions.onConfirmation).toHaveBeenCalledWith(
+        "Last element deleted. Say 'undo' to restore.",
+      );
+    });
+
+    it("provides success audio feedback", () => {
+      handleDeleteCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledTimes(1);
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledWith("success");
+    });
+
+    it("works without any callbacks", () => {
+      expect(() => {
+        handleDeleteCommand(mockCommand);
+      }).not.toThrow();
+    });
+
+    it("works with partial callbacks", () => {
+      const partialOptions: ScriptCommandHandlerOptions = {
+        onDelete: vi.fn(),
+      };
+
+      handleDeleteCommand(mockCommand, partialOptions);
+
+      expect(partialOptions.onDelete).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("handleUndoCommand", () => {
+    let mockOptions: ScriptCommandHandlerOptions;
+    let mockCommand: VoiceCommand;
+
+    beforeEach(() => {
+      mockOptions = {
+        onUndo: vi.fn(),
+        onConfirmation: vi.fn(),
+        onAudioFeedback: vi.fn(),
+      };
+
+      mockCommand = {
+        type: "undo",
+        rawText: "undo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+    });
+
+    it("calls onUndo callback", () => {
+      handleUndoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onUndo).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows success confirmation", () => {
+      handleUndoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onConfirmation).toHaveBeenCalledTimes(1);
+      expect(mockOptions.onConfirmation).toHaveBeenCalledWith("Undo successful");
+    });
+
+    it("provides success audio feedback", () => {
+      handleUndoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledTimes(1);
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledWith("success");
+    });
+
+    it("works without any callbacks", () => {
+      expect(() => {
+        handleUndoCommand(mockCommand);
+      }).not.toThrow();
+    });
+
+    it("works with partial callbacks", () => {
+      const partialOptions: ScriptCommandHandlerOptions = {
+        onUndo: vi.fn(),
+      };
+
+      handleUndoCommand(mockCommand, partialOptions);
+
+      expect(partialOptions.onUndo).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("handleRedoCommand", () => {
+    let mockOptions: ScriptCommandHandlerOptions;
+    let mockCommand: VoiceCommand;
+
+    beforeEach(() => {
+      mockOptions = {
+        onRedo: vi.fn(),
+        onConfirmation: vi.fn(),
+        onAudioFeedback: vi.fn(),
+      };
+
+      mockCommand = {
+        type: "redo",
+        rawText: "redo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+    });
+
+    it("calls onRedo callback", () => {
+      handleRedoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onRedo).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows success confirmation", () => {
+      handleRedoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onConfirmation).toHaveBeenCalledTimes(1);
+      expect(mockOptions.onConfirmation).toHaveBeenCalledWith("Redo successful");
+    });
+
+    it("provides success audio feedback", () => {
+      handleRedoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledTimes(1);
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledWith("success");
+    });
+
+    it("works without any callbacks", () => {
+      expect(() => {
+        handleRedoCommand(mockCommand);
+      }).not.toThrow();
+    });
+
+    it("works with partial callbacks", () => {
+      const partialOptions: ScriptCommandHandlerOptions = {
+        onRedo: vi.fn(),
+      };
+
+      handleRedoCommand(mockCommand, partialOptions);
+
+      expect(partialOptions.onRedo).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("F014 Acceptance Criteria", () => {
+    it("removes most recent element via callback", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onDelete: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "delete",
+        rawText: "delete that",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleDeleteCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onDelete).toHaveBeenCalled();
+    });
+
+    it("supports undo (mentions in confirmation)", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onConfirmation: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "delete",
+        rawText: "delete that",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleDeleteCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onConfirmation).toHaveBeenCalledWith(
+        expect.stringContaining("undo"),
+      );
+    });
+
+    it("shows confirmation message", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onConfirmation: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "delete",
+        rawText: "delete that",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleDeleteCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onConfirmation).toHaveBeenCalled();
+    });
+  });
+
+  describe("F015 Acceptance Criteria", () => {
+    it("triggers undo action via callback", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onUndo: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "undo",
+        rawText: "undo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleUndoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onUndo).toHaveBeenCalled();
+    });
+
+    it("triggers redo action via callback", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onRedo: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "redo",
+        rawText: "redo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleRedoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onRedo).toHaveBeenCalled();
+    });
+
+    it("provides audio feedback for undo", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onAudioFeedback: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "undo",
+        rawText: "undo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleUndoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledWith("success");
+    });
+
+    it("provides audio feedback for redo", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onAudioFeedback: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "redo",
+        rawText: "redo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleRedoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onAudioFeedback).toHaveBeenCalledWith("success");
+    });
+
+    it("updates UI via confirmation for undo", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onConfirmation: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "undo",
+        rawText: "undo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleUndoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onConfirmation).toHaveBeenCalled();
+    });
+
+    it("updates UI via confirmation for redo", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onConfirmation: vi.fn(),
+      };
+
+      const mockCommand: VoiceCommand = {
+        type: "redo",
+        rawText: "redo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handleRedoCommand(mockCommand, mockOptions);
+
+      expect(mockOptions.onConfirmation).toHaveBeenCalled();
+    });
+  });
+
+  describe("createScriptCommandHandlers with new commands", () => {
+    it("includes delete, undo, and redo handlers", () => {
+      const handlers = createScriptCommandHandlers();
+
+      expect(handlers).toHaveProperty("delete");
+      expect(handlers).toHaveProperty("undo");
+      expect(handlers).toHaveProperty("redo");
+      expect(typeof handlers.delete).toBe("function");
+      expect(typeof handlers.undo).toBe("function");
+      expect(typeof handlers.redo).toBe("function");
+    });
+
+    it("delete handler works when called", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onDelete: vi.fn(),
+      };
+
+      const handlers = createScriptCommandHandlers(mockOptions);
+      const mockCommand: VoiceCommand = {
+        type: "delete",
+        rawText: "delete that",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handlers.delete(mockCommand);
+
+      expect(mockOptions.onDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it("undo handler works when called", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onUndo: vi.fn(),
+      };
+
+      const handlers = createScriptCommandHandlers(mockOptions);
+      const mockCommand: VoiceCommand = {
+        type: "undo",
+        rawText: "undo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handlers.undo(mockCommand);
+
+      expect(mockOptions.onUndo).toHaveBeenCalledTimes(1);
+    });
+
+    it("redo handler works when called", () => {
+      const mockOptions: ScriptCommandHandlerOptions = {
+        onRedo: vi.fn(),
+      };
+
+      const handlers = createScriptCommandHandlers(mockOptions);
+      const mockCommand: VoiceCommand = {
+        type: "redo",
+        rawText: "redo",
+        params: {},
+        confidence: 0.95,
+        timestamp: Date.now(),
+      };
+
+      handlers.redo(mockCommand);
+
+      expect(mockOptions.onRedo).toHaveBeenCalledTimes(1);
     });
   });
 });

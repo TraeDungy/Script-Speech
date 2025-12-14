@@ -2,6 +2,8 @@
  * Voice Command Handlers for Script Document Operations
  * F012: Voice command: New Scene
  * F013: Voice command: New Character
+ * F014: Voice command: Delete
+ * F015: Voice command: Undo/Redo
  *
  * These handlers integrate voice commands with the Script-Speech document store
  */
@@ -82,6 +84,30 @@ export interface ScriptCommandHandlerOptions {
    * @param characterId - The ID of the character to edit
    */
   onOpenCharacterEditor?: (characterId: string) => void;
+
+  /**
+   * Callback for delete operation
+   * Should delete the most recent element
+   */
+  onDelete?: () => void;
+
+  /**
+   * Callback for undo operation
+   * Should trigger undo in the document history
+   */
+  onUndo?: () => void;
+
+  /**
+   * Callback for redo operation
+   * Should trigger redo in the document history
+   */
+  onRedo?: () => void;
+
+  /**
+   * Callback for audio feedback
+   * @param type - Type of audio feedback (success, error, info)
+   */
+  onAudioFeedback?: (type: "success" | "error" | "info") => void;
 }
 
 /**
@@ -150,11 +176,86 @@ export function handleNewCharacterCommand(
 }
 
 /**
+ * Handler for "delete" voice command
+ * F014: Removes most recent element, supports undo, shows confirmation
+ */
+export function handleDeleteCommand(
+  command: VoiceCommand,
+  options: ScriptCommandHandlerOptions = {},
+): void {
+  // Trigger delete operation
+  if (options.onDelete) {
+    options.onDelete();
+  }
+
+  // Show confirmation
+  if (options.onConfirmation) {
+    options.onConfirmation("Last element deleted. Say 'undo' to restore.");
+  }
+
+  // Provide audio feedback
+  if (options.onAudioFeedback) {
+    options.onAudioFeedback("success");
+  }
+}
+
+/**
+ * Handler for "undo" voice command
+ * F015: Triggers undo action, provides audio feedback, updates UI
+ */
+export function handleUndoCommand(
+  command: VoiceCommand,
+  options: ScriptCommandHandlerOptions = {},
+): void {
+  // Trigger undo operation
+  if (options.onUndo) {
+    options.onUndo();
+  }
+
+  // Show confirmation
+  if (options.onConfirmation) {
+    options.onConfirmation("Undo successful");
+  }
+
+  // Provide audio feedback
+  if (options.onAudioFeedback) {
+    options.onAudioFeedback("success");
+  }
+}
+
+/**
+ * Handler for "redo" voice command
+ * F015: Triggers redo action, provides audio feedback, updates UI
+ */
+export function handleRedoCommand(
+  command: VoiceCommand,
+  options: ScriptCommandHandlerOptions = {},
+): void {
+  // Trigger redo operation
+  if (options.onRedo) {
+    options.onRedo();
+  }
+
+  // Show confirmation
+  if (options.onConfirmation) {
+    options.onConfirmation("Redo successful");
+  }
+
+  // Provide audio feedback
+  if (options.onAudioFeedback) {
+    options.onAudioFeedback("success");
+  }
+}
+
+/**
  * Factory function to create script command handlers bound to specific options
  */
 export function createScriptCommandHandlers(options: ScriptCommandHandlerOptions = {}) {
   return {
     new_scene: (command: VoiceCommand) => handleNewSceneCommand(command, options),
     new_character: (command: VoiceCommand) => handleNewCharacterCommand(command, options),
+    delete: (command: VoiceCommand) => handleDeleteCommand(command, options),
+    undo: (command: VoiceCommand) => handleUndoCommand(command, options),
+    redo: (command: VoiceCommand) => handleRedoCommand(command, options),
   };
 }
