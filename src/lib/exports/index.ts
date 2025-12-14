@@ -11,6 +11,8 @@ import {
 } from "@/lib/db/exportJobs";
 import type { ExportFormat, ExportJob, ExportJobResult, ScriptDoc } from "./types";
 import { getSupabaseServiceClient } from "@/lib/supabase.server";
+import { scriptDocToFountain as convertToFountain, estimatePageCount } from "./fountain";
+import type { ScriptDoc as FullScriptDoc } from "@/lib/scriptDoc";
 import {
   S3_ACCESS_KEY_ID,
   S3_BUCKET,
@@ -26,7 +28,7 @@ import {
 export type ExportQueuePayload = {
   projectId: string;
   format: ExportFormat;
-  scriptDoc: ScriptDoc;
+  scriptDoc: FullScriptDoc;  // Use the full ScriptDoc type from lib/scriptDoc
   deliverToEmail?: string;
   userId?: string;
 };
@@ -360,14 +362,16 @@ function paginateLines(lines: string[], maxLinesPerPage = DEFAULT_LINES_PER_PAGE
   return { pages: pages.length ? pages : [[]], pageCount: pages.length || 1 };
 }
 
-function scriptDocToFountain(doc: ScriptDoc): RenderedExportResult {
-  const { pages, pageCount } = paginateLines(formatScriptDocLines(doc));
-  const body = pages.flat().join("\n").trimEnd().concat("\n");
+function scriptDocToFountain(doc: FullScriptDoc): RenderedExportResult {
+  // Use the new Fountain library for proper formatting
+  const fountainText = convertToFountain(doc);
+  const pageCount = estimatePageCount(fountainText);
+
   return {
-    buffer: Buffer.from(body, "utf8"),
+    buffer: Buffer.from(fountainText, "utf8"),
     extension: "fountain",
     mime: "text/plain;charset=utf-8",
-    notes: `Generated from ScriptDoc snapshot (${pageCount} page${pageCount === 1 ? "" : "s"})`,
+    notes: `Generated from ScriptDoc snapshot (estimated ${pageCount} page${pageCount === 1 ? "" : "s"})`,
     pageCount,
   };
 }
