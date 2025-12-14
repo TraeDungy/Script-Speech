@@ -4,6 +4,7 @@ import type { ChangeEvent, ReactNode, UIEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ExportQueuePanel } from "@/components/ExportQueuePanel";
+import { SceneBreakdown } from "@/components/SceneBreakdown";
 import type { ScriptDoc } from "@/lib/scriptDoc";
 import type { StudioSessionRecord, StudioSlotPayload } from "@/lib/db/studioSessions";
 import type { StudioInitializationPayload } from "./actions";
@@ -888,6 +889,8 @@ export default function StudioPage() {
   const metadata = useScriptDocStore((state) => state.doc.metadata);
   const loadDoc = useScriptDocStore((state) => state.loadDoc);
   const updateMetadata = useScriptDocStore((state) => state.updateMetadata);
+  const scenes = useScriptDocStore(selectScenes);
+  const characters = useScriptDocStore((state) => state.doc.characters);
   const [initialization, setInitialization] = useState<StudioInitializationPayload | null>(null);
   const [session, setSession] = useState<StudioSessionRecord | null>(null);
   const projectId = metadata.projectId ?? "preview-project";
@@ -991,6 +994,11 @@ export default function StudioPage() {
         <section>
           <ConceptIntelligencePanel />
         </section>
+
+        <section className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+          <SceneBreakdown scenes={scenes} characters={characters} />
+        </section>
+
         <section className="grid gap-10 md:grid-cols-[1.4fr_1fr]">
           <div className="space-y-6">
             <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur">
