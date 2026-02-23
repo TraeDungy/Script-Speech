@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
+import {
+  createSubscription,
+  getSubscriptionByStripeId,
+  updateSubscriptionStatus,
+  resetMonthlyCredits,
+  markAsPastDue,
+  cancelSubscription,
+} from '@/lib/db/subscriptions';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
   apiVersion: '2024-12-18.acacia',
@@ -26,19 +34,27 @@ export async function POST(req: NextRequest) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        const { userId, tier, credits } = session.metadata || {};
+        const { userId, tier } = session.metadata || {};
+        const customerId = session.customer as string;
         
         console.log(`[Stripe] Subscription created: ${session.subscription}`);
-        console.log(`[Stripe] User: ${userId}, Tier: ${tier}, Credits: ${credits}`);
+        console.log(`[Stripe] User: ${userId}, Tier: ${tier}`);
         
-        // TODO: Update database with subscription info
-        // await db.subscriptions.create({
-        //   userId,
-        //   stripeSubscriptionId: session.subscription,
-        //   tier,
-        //   credits: parseInt(credits || '0'),
-        //   status: 'active',
-        // });
+        if (!userId || !tier || !session.subscription) {
+          console.error('[Stripe] Missing required metadata');
+          break;
+        }
+
+        try {
+          await createSubscription(userId, {
+            stripeSubscriptionId: session.subscription as string,
+            stripeCustomerId: customerId,
+            tier: tier as 'creator' | 'pro' | 'agency',
+          });
+          console.log(`[Stripe] Subscription saved to database`);
+        } catch (error) {
+          console.error('[Stripe] Error saving subscription:', error);
+        }
         
         break;
       }
@@ -49,8 +65,13 @@ export async function POST(req: NextRequest) {
         
         console.log(`[Stripe] Payment succeeded for subscription: ${subscriptionId}`);
         
-        // TODO: Reset monthly credits
-        // await db.subscriptions.updateCredits(subscriptionId);
+        try {
+          await resetMonthlyCredits(subscriptionId);
+          await updateSubscriptionStatus(subscriptionId, 'active');
+          console.log(`[Stripe] Monthly credits reset and subscription marked active`);
+        } catch (error) {
+          console.error('[Stripe] Error resetting credits:', error);
+        }
         
         break;
       }
@@ -61,8 +82,13 @@ export async function POST(req: NextRequest) {
         
         console.log(`[Stripe] Payment failed for subscription: ${subscriptionId}`);
         
-        // TODO: Mark subscription as past_due, send notification
-        // await db.subscriptions.updateStatus(subscriptionId, 'past_due');
+        try {
+          await markAsPastDue(subscriptionId);
+          // TODO: Send notification email to user
+          console.log(`[Stripe] Subscription marked as past_due`);
+        } catch (error) {
+          console.error('[Stripe] Error marking as past due:', error);
+        }
         
         break;
       }
@@ -72,8 +98,12 @@ export async function POST(req: NextRequest) {
         
         console.log(`[Stripe] Subscription cancelled: ${subscription.id}`);
         
-        // TODO: Mark subscription as cancelled
-        // await db.subscriptions.updateStatus(subscription.id, 'cancelled');
+        try {
+          await cancelSubscription(subscription.id);
+          console.log(`[Stripe] Subscription marked as cancelled in database`);
+        } catch (error) {
+          console.error('[Stripe] Error cancelling subscription:', error);
+        }
         
         break;
       }
