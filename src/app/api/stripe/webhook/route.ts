@@ -118,10 +118,3 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ received: true });
 }
-
-// Disable body parsing for raw payload
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
