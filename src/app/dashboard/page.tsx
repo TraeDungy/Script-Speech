@@ -9,7 +9,20 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
+  // Demo mode: show dashboard without auth if Supabase not configured
+  const hasSupabaseConfig = !!(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+
   useEffect(() => {
+    // Demo mode: skip auth check
+    if (!hasSupabaseConfig) {
+      setUser({ email: 'demo@example.com', id: 'demo-user' });
+      setLoading(false);
+      return;
+    }
+
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -23,7 +36,7 @@ export default function DashboardPage() {
         setLoading(false);
       }
     });
-  }, [router]);
+  }, [router, hasSupabaseConfig]);
 
   if (loading) {
     return (

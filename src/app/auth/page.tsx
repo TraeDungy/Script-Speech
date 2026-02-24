@@ -12,10 +12,16 @@ export default function AuthPage() {
   const [error, setError] = useState('');
   const router = useRouter();
   
-  const supabase = createClient(
+  // Demo mode: allow navigation without auth if no Supabase key
+  const hasSupabaseConfig = !!(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+
+  const supabase = hasSupabaseConfig ? createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || '',
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-  );
+  ) : null;
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,6 +29,12 @@ export default function AuthPage() {
     setError('');
 
     try {
+      // Demo mode: skip auth, go directly to dashboard
+      if (!supabase) {
+        router.push('/dashboard');
+        return;
+      }
+
       if (isSignUp) {
         const { error } = await supabase.auth.signUp({
           email,

@@ -13,7 +13,31 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const router = useRouter();
 
+  // Demo mode: allow settings without auth if Supabase not configured
+  const hasSupabaseConfig = !!(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+
   useEffect(() => {
+    // Demo mode: skip auth check
+    if (!hasSupabaseConfig) {
+      setUser({ email: 'demo@example.com', id: 'demo-user' });
+      
+      // Fetch TTS providers for demo mode
+      fetch('/api/tts/settings')
+        .then(res => res.json())
+        .then(data => {
+          setProviders(data.providers);
+          setLoading(false);
+        })
+        .catch(err => {
+          console.error('Failed to load providers:', err);
+          setLoading(false);
+        });
+      return;
+    }
+
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -39,7 +63,7 @@ export default function SettingsPage() {
           setLoading(false);
         });
     });
-  }, [router]);
+  }, [router, hasSupabaseConfig]);
 
   const handleProviderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const provider = e.target.value;
