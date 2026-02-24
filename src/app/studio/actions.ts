@@ -5,6 +5,22 @@ import { headers } from "next/headers";
 import { listEntityAssets, listReferenceAssets } from "@/lib/assets";
 import { requireServerAuthSession } from "@/lib/auth/server";
 import { getStudioHydration } from "@/lib/db/projects";
+
+// Demo mode helper: get user ID with fallback for demo mode
+async function getDemoAwareUserId(): Promise<string> {
+  const hasSupabaseConfig = !!(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+
+  if (hasSupabaseConfig) {
+    const { user } = await requireServerAuthSession({ redirectTo: "/" });
+    return user.id;
+  }
+
+  // Demo mode: use demo user ID
+  return "demo-user";
+}
 import { recordBusinessEvent, withSpan } from "@/lib/observability";
 import { createRequestLogger, getRequestIdFromHeaders } from "@/lib/requestContext";
 import {
@@ -29,8 +45,8 @@ export interface StudioInitializationPayload {
 }
 
 export async function initializeStudioSession(): Promise<StudioInitializationPayload> {
-  const { user } = await requireServerAuthSession({ redirectTo: "/" });
-  const session = await ensureStudioProjectSession(user.id);
+  const userId = await getDemoAwareUserId();
+  const session = await ensureStudioProjectSession(userId);
 
   const [hydration, references, entityAssets] = await Promise.all([
     getStudioHydration(session.projectId),
@@ -53,11 +69,11 @@ export async function saveStudioSlotInputs(input: {
   projectId: string;
   slots: StudioSlotPayload;
 }): Promise<StudioSessionRecord> {
-  const { user } = await requireServerAuthSession();
+  const userId = await getDemoAwareUserId();
   return captureProjectSlots({
     sessionId: input.sessionId,
     projectId: input.projectId,
-    userId: user.id,
+    userId,
     slots: input.slots,
   });
 }
@@ -67,7 +83,7 @@ export async function confirmStudioSessionAction(input: {
   projectId: string;
   summary?: StudioSlotPayload | null;
 }): Promise<StudioSessionRecord> {
-  const { user } = await requireServerAuthSession();
+  const userId = await getDemoAwareUserId();
   const requestId = getRequestIdFromHeaders(headers());
   const log = createRequestLogger(requestId);
 
@@ -80,7 +96,7 @@ export async function confirmStudioSessionAction(input: {
       const confirmation = await confirmProjectSession({
         sessionId: input.sessionId,
         projectId: input.projectId,
-        userId: user.id,
+        userId,
         summary: input.summary ?? null,
       });
 
@@ -106,11 +122,11 @@ export async function persistStudioTranscript(input: {
   speaker?: string;
   source?: string;
 }): Promise<void> {
-  const { user } = await requireServerAuthSession();
+  const userId = await getDemoAwareUserId();
   await logProjectTranscript({
     sessionId: input.sessionId,
     projectId: input.projectId,
-    userId: user.id,
+    userId,
     transcript: input.transcript,
     speaker: input.speaker,
     source: input.source,
