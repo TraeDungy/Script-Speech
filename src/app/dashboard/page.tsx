@@ -3,26 +3,32 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@supabase/supabase-js';
+import { logout, isDemoUser, getDemoUserEmail } from '@/lib/auth/client';
 
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [demoMode, setDemoMode] = useState(false);
   const router = useRouter();
 
-  // Demo mode: show dashboard without auth if Supabase not configured
+  // Check if in demo mode
   const hasSupabaseConfig = !!(
     process.env.NEXT_PUBLIC_SUPABASE_URL &&
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   );
 
   useEffect(() => {
-    // Demo mode: skip auth check
+    setDemoMode(!hasSupabaseConfig);
+
+    // Demo mode: load demo user
     if (!hasSupabaseConfig) {
-      setUser({ email: 'demo@example.com', id: 'demo-user' });
+      const demoEmail = getDemoUserEmail() || 'demo@example.com';
+      setUser({ email: demoEmail, id: 'demo-user' });
       setLoading(false);
       return;
     }
 
+    // Production mode: load from Supabase
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || '',
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -30,7 +36,7 @@ export default function DashboardPage() {
 
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) {
-        router.push('/auth');
+        router.push('/auth/login');
       } else {
         setUser(user);
         setLoading(false);
@@ -68,18 +74,41 @@ export default function DashboardPage() {
           <div>
             <h1 style={{ margin: 0 }}>Script-Speech</h1>
             <p style={{ margin: '5px 0 0', opacity: 0.8 }}>Welcome, {user?.email}</p>
+            {demoMode && <p style={{ margin: '5px 0 0', opacity: 0.6, fontSize: '12px' }}>🎭 Demo Mode</p>}
           </div>
-          <a href="/settings" style={{
-            padding: '10px 20px',
-            background: 'rgba(255,255,255,0.2)',
-            border: '1px solid rgba(255,255,255,0.3)',
-            borderRadius: '6px',
-            color: 'white',
-            textDecoration: 'none',
-            cursor: 'pointer',
-          }}>
-            ⚙️ Settings
-          </a>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <a href="/settings" style={{
+              padding: '10px 20px',
+              background: 'rgba(255,255,255,0.2)',
+              border: '1px solid rgba(255,255,255,0.3)',
+              borderRadius: '6px',
+              color: 'white',
+              textDecoration: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }} onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.3)';
+            }} onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.2)';
+            }}>
+              ⚙️ Settings
+            </a>
+            <button onClick={() => logout()} style={{
+              padding: '10px 20px',
+              background: 'rgba(255,255,255,0.1)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '6px',
+              color: 'white',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }} onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.15)';
+            }} onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+            }}>
+              🚪 Sign out
+            </button>
+          </div>
         </div>
       </div>
 
