@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { Buffer } from "buffer";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -150,7 +151,7 @@ export async function POST(request: NextRequest) {
           size,
           projectId: typeof projectId === "string" ? projectId : null,
           tags: Array.isArray(tags) ? (tags as string[]) : undefined,
-          sourceType: typeof sourceType === "string" ? sourceType : undefined,
+          sourceType: typeof sourceType === "string" ? sourceType as import("@/lib/types/assets").AssetSourceType : undefined,
           url: typeof url === "string" ? url : undefined,
         });
 

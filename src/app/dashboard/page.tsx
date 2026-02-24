@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Mic, FileText, CreditCard, Download, Settings } from 'lucide-react';
 
 interface UsageStats {
@@ -11,13 +11,13 @@ interface UsageStats {
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<UsageStats>({
+  const [stats] = useState<UsageStats>({
     charactersUsed: 0,
     charactersLimit: 10000,
     audioFilesGenerated: 12,
     subscriptionTier: 'Creator',
   });
-  const [recentGenerations, setRecentGenerations] = useState([
+  const [recentGenerations] = useState([
     { id: 1, text: 'Welcome to Script-Speech...', voice: 'Adam', date: '2024-02-21', chars: 150 },
     { id: 2, text: 'In this tutorial we will...', voice: 'Bella', date: '2024-02-20', chars: 280 },
     { id: 3, text: 'Today\'s episode covers...', voice: 'Charlie', date: '2024-02-19', chars: 420 },
@@ -136,7 +136,7 @@ export default function DashboardPage() {
                 <div key={gen.id} className="p-6 hover:bg-slate-700/50 transition-colors">
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
-                      <p className="text-slate-300 truncate mb-1">"{gen.text}"</p>
+                      <p className="text-slate-300 truncate mb-1">&quot;{gen.text}&quot;</p>
                       <div className="flex items-center gap-4 text-sm text-slate-500">
                         <span className="flex items-center gap-1">
                           <Settings className="w-4 h-4" />

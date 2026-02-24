@@ -12,3 +12,4 @@ pnpm-debug.log*
 .data
 tsconfig.tsbuildinfo
 tsconfig.typecheck.tsbuildinfo
+.vercel

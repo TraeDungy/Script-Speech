@@ -1,15 +1,15 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import {
   createSubscription,
-  getSubscriptionByStripeId,
   updateSubscriptionStatus,
   resetMonthlyCredits,
   markAsPastDue,
   cancelSubscription,
 } from '@/lib/db/subscriptions';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+const getStripe = () => new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_placeholder', {
   apiVersion: '2024-12-18.acacia',
 });
 
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(payload, signature, webhookSecret);
+    event = getStripe().webhooks.constructEvent(payload, signature, webhookSecret);
   } catch (err) {
     console.error('[Stripe Webhook] Invalid signature:', err);
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });

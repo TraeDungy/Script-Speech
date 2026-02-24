@@ -1,7 +1,8 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
+const getStripe = () => new Stripe(process.env.STRIPE_SECRET_KEY || 'sk_placeholder', {
   apiVersion: '2024-12-18.acacia',
 });
 
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Create checkout session
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer_email: email,
       line_items: [
         {
@@ -91,7 +92,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const session = await getStripe().checkout.sessions.retrieve(sessionId);
     return NextResponse.json({
       status: session.status,
       subscription: session.subscription,

@@ -19,6 +19,7 @@ interface SpanResult {
   error?: unknown;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface ApiMetricAttributes {
   route: string;
   method: string;

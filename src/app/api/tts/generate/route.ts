@@ -1,3 +1,4 @@
+export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from 'next/server';
 import { ElevenLabsClient } from 'elevenlabs';
 import { createClient } from '@supabase/supabase-js';
@@ -7,16 +8,22 @@ import {
   getSubscriptionByUserId,
 } from '@/lib/db/subscriptions';
 
-// Initialize ElevenLabs client
-const elevenlabs = new ElevenLabsClient({
-  apiKey: process.env.ELEVENLABS_API_KEY,
+// Lazy ElevenLabs client
+const getElevenLabs = () => new ElevenLabsClient({
+  apiKey: process.env.ELEVENLABS_API_KEY || 'placeholder',
 });
 
-// Initialize Supabase client for auth
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-);
+// Lazy Supabase client for auth
+let _supabase: ReturnType<typeof createClient> | null = null;
+const getSupabase = () => {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+    );
+  }
+  return _supabase;
+};
 
 // Voice mapping
 const VOICES = {
@@ -69,7 +76,7 @@ export async function POST(req: NextRequest) {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    const { data: { user }, error: authError } = await getSupabase().auth.getUser(token);
 
     if (authError || !user) {
       return NextResponse.json(
@@ -103,7 +110,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Generate audio
-    const audioStream = await elevenlabs.generate({
+    const audioStream = await getElevenLabs().generate({
       voice: VOICES[voice as keyof typeof VOICES] || 'Adam',
       text: text,
       model_id: model,

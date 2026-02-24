@@ -1,0 +1,6 @@
+src/lib/db/subscriptions.ts
+src/lib/exports/index.ts
+src/lib/observability.ts
+src/app/api/exports/route.ts
+src/app/api/tts/generate/route.ts
+src/components/**

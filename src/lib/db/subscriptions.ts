@@ -1,10 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 import { Database } from './generated.types';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-
-const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+let _supabase: ReturnType<typeof createClient<Database>> | null = null;
+const getSupabase = () => {
+  if (!_supabase) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    _supabase = createClient<Database>(url, key);
+  }
+  return _supabase;
+};
 
 export type SubscriptionStatus = 'active' | 'past_due' | 'cancelled' | 'expired';
 export type TierType = 'creator' | 'pro' | 'agency';
@@ -119,6 +124,7 @@ export async function updateSubscriptionStatus(
   stripeSubscriptionId: string,
   status: SubscriptionStatus
 ): Promise<Subscription> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updates: any = {
     status,
     updated_at: new Date().toISOString(),

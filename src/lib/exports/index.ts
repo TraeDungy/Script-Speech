@@ -575,6 +575,7 @@ async function maybeDeliverExportEmail(
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function buildDownloadReference(artifact: StoredArtifact, fileName: string): string | null {
   if (artifact.downloadUrl) return artifact.downloadUrl;
   if (artifact.storageDriver && artifact.storageBucket && artifact.storagePath) {
