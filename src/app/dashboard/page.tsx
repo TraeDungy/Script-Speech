@@ -1,181 +1,254 @@
 'use client';
 
-import { useState } from 'react';
-import { Mic, FileText, CreditCard, Download, Settings } from 'lucide-react';
-
-interface UsageStats {
-  charactersUsed: number;
-  charactersLimit: number;
-  audioFilesGenerated: number;
-  subscriptionTier: string;
-}
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createBrowserClient } from '@supabase/ssr';
 
 export default function DashboardPage() {
-  const [stats] = useState<UsageStats>({
-    charactersUsed: 0,
-    charactersLimit: 10000,
-    audioFilesGenerated: 12,
-    subscriptionTier: 'Creator',
-  });
-  const [recentGenerations] = useState([
-    { id: 1, text: 'Welcome to Script-Speech...', voice: 'Adam', date: '2024-02-21', chars: 150 },
-    { id: 2, text: 'In this tutorial we will...', voice: 'Bella', date: '2024-02-20', chars: 280 },
-    { id: 3, text: 'Today\'s episode covers...', voice: 'Charlie', date: '2024-02-19', chars: 420 },
-  ]);
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
-  const usagePercent = Math.round((stats.charactersUsed / stats.charactersLimit) * 100);
+  useEffect(() => {
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+    );
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) {
+        router.push('/auth');
+      } else {
+        setUser(user);
+        setLoading(false);
+      }
+    });
+  }, [router]);
+
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
+      }}>
+        <p>Loading...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold">Dashboard</h1>
-            <p className="text-slate-400">Manage your voiceover generations</p>
-          </div>
-          <a
-            href="/tts"
-            className="bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all"
-          >
-            <Mic className="w-5 h-5" />
-            Generate New
-          </a>
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+      color: 'white',
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '20px',
+        borderBottom: '1px solid rgba(255,255,255,0.1)',
+      }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          <h1 style={{ margin: 0 }}>Script-Speech</h1>
+          <p style={{ margin: '5px 0 0', opacity: 0.8 }}>Welcome, {user?.email}</p>
         </div>
+      </div>
 
-        {/* Stats Cards */}
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
-          {/* Usage Card */}
-          <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-400" />
-                Character Usage
-              </h3>
-              <span className="text-2xl font-bold text-blue-400">
-                {usagePercent}%
-              </span>
-            </div>
-            <div className="w-full bg-slate-700 rounded-full h-3 mb-3">
-              <div
-                className={`h-3 rounded-full transition-all ${
-                  usagePercent > 80 ? 'bg-red-500' : usagePercent > 50 ? 'bg-yellow-500' : 'bg-blue-500'
-                }`}
-                style={{ width: `${Math.min(usagePercent, 100)}%` }}
-              />
-            </div>
-            <p className="text-sm text-slate-400">
-              {stats.charactersUsed.toLocaleString()} / {stats.charactersLimit.toLocaleString()} characters used
-            </p>
-            <p className="text-sm text-slate-500 mt-2">
-              {stats.charactersLimit - stats.charactersUsed} remaining this month
-            </p>
-          </div>
+      {/* Main Content */}
+      <div style={{
+        maxWidth: '1200px',
+        margin: '0 auto',
+        padding: '40px 20px',
+      }}>
+        <h2>Generate AI Voiceovers</h2>
+        <p style={{ fontSize: '16px', opacity: 0.9, marginBottom: '30px' }}>
+          Convert your text into natural-sounding speech with 50+ AI voices.
+        </p>
 
-          {/* Tier Card */}
-          <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <CreditCard className="w-5 h-5 text-emerald-400" />
-                Plan
-              </h3>
-              <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-full text-sm font-semibold">
-                {stats.subscriptionTier}
-              </span>
-            </div>
-            <p className="text-3xl font-bold mb-2">
-              ${stats.subscriptionTier === 'Creator' ? '10' : stats.subscriptionTier === 'Pro' ? '50' : '500'}
-              <span className="text-lg font-normal text-slate-400">/month</span>
-            </p>
-            <p className="text-sm text-slate-400">
-              {stats.charactersLimit.toLocaleString()} characters included
-            </p>
-            <a
-              href="/pricing"
-              className="mt-4 inline-block text-emerald-400 hover:text-emerald-300 text-sm font-medium"
-            >
-              Upgrade plan →
-            </a>
-          </div>
-
-          {/* Quick Stats */}
-          <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <Download className="w-5 h-5 text-purple-400" />
-                Total Generated
-              </h3>
-            </div>
-            <p className="text-3xl font-bold text-purple-400">
-              {stats.audioFilesGenerated}
-            </p>
-            <p className="text-sm text-slate-400 mt-2">Audio files created</p>
-            <div className="flex items-center gap-4 mt-4 text-sm text-slate-400">
-              <span>This week: +5</span>
-              <span>This month: +12</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Generations */}
-        <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-          <div className="p-6 border-b border-slate-700">
-            <h3 className="text-xl font-semibold">Recent Generations</h3>
-          </div>
-          <div className="divide-y divide-slate-700">
-            {recentGenerations.length === 0 ? (
-              <div className="p-8 text-center text-slate-500">
-                <Mic className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No audio generated yet</p>
-                <a href="/tts" className="text-blue-400 hover:text-blue-300 mt-2 inline-block">
-                  Create your first voiceover →
-                </a>
-              </div>
-            ) : (
-              recentGenerations.map((gen) => (
-                <div key={gen.id} className="p-6 hover:bg-slate-700/50 transition-colors">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-slate-300 truncate mb-1">&quot;{gen.text}&quot;</p>
-                      <div className="flex items-center gap-4 text-sm text-slate-500">
-                        <span className="flex items-center gap-1">
-                          <Settings className="w-4 h-4" />
-                          {gen.voice}
-                        </span>
-                        <span>{gen.chars} chars</span>
-                        <span>{gen.date}</span>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 ml-4">
-                      <button className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
-                        <Download className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+        {/* Feature Grid */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+          gap: '20px',
+          marginBottom: '40px',
+        }}>
+          <FeatureCard
+            icon="🎤"
+            title="50+ Voices"
+            description="Choose from multiple languages and voice styles"
+          />
+          <FeatureCard
+            icon="⚡"
+            title="Instant"
+            description="Generate voiceovers in seconds"
+          />
+          <FeatureCard
+            icon="💼"
+            title="Commercial"
+            description="Use for commercial projects with included license"
+          />
         </div>
 
         {/* Quick Actions */}
-        <div className="mt-8 grid md:grid-cols-2 gap-4">
-          <a
-            href="/pricing"
-            className="bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl p-6 transition-colors"
-          >
-            <h4 className="font-semibold mb-2">Need more characters?</h4>
-            <p className="text-sm text-slate-400">Upgrade to Pro for 5x more monthly credits</p>
-          </a>
-          <a
-            href="/api/docs"
-            className="bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl p-6 transition-colors"
-          >
-            <h4 className="font-semibold mb-2">API Access</h4>
-            <p className="text-sm text-slate-400">Integrate voice generation into your workflows</p>
-          </a>
+        <div style={{
+          background: 'rgba(255,255,255,0.1)',
+          border: '1px solid rgba(255,255,255,0.2)',
+          borderRadius: '12px',
+          padding: '30px',
+          backdropFilter: 'blur(10px)',
+        }}>
+          <h3 style={{ marginTop: 0 }}>Get Started</h3>
+          
+          <div style={{
+            display: 'flex',
+            gap: '15px',
+            marginBottom: '20px',
+            flexWrap: 'wrap',
+          }}>
+            <QuickActionButton
+              href="/studio"
+              label="📝 Create Script"
+              description="Write and edit your script"
+            />
+            <QuickActionButton
+              href="/voiceover"
+              label="🎯 Generate Voiceover"
+              description="Convert text to speech"
+            />
+            <QuickActionButton
+              href="/pricing"
+              label="💳 View Pricing"
+              description="Check subscription plans"
+            />
+          </div>
+
+          {/* API Info */}
+          <div style={{
+            marginTop: '30px',
+            paddingTop: '20px',
+            borderTop: '1px solid rgba(255,255,255,0.1)',
+          }}>
+            <h4 style={{ marginTop: 0 }}>Using the API?</h4>
+            <p style={{ opacity: 0.9 }}>
+              Access our REST API to generate voiceovers programmatically.
+            </p>
+            <code style={{
+              background: 'rgba(0,0,0,0.2)',
+              padding: '10px',
+              borderRadius: '6px',
+              display: 'block',
+              fontSize: '12px',
+              marginTop: '10px',
+              overflowX: 'auto',
+            }}>
+              POST /api/tts/generate
+            </code>
+          </div>
+        </div>
+
+        {/* Pricing Summary */}
+        <div style={{ marginTop: '40px' }}>
+          <h3>Simple Pricing</h3>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+            gap: '20px',
+          }}>
+            <PricingCard
+              tier="Creator"
+              price="$10/mo"
+              characters="10,000"
+              description="Perfect for YouTubers and podcasters"
+            />
+            <PricingCard
+              tier="Pro"
+              price="$50/mo"
+              characters="100,000"
+              description="For growing creators and teams"
+            />
+            <PricingCard
+              tier="Agency"
+              price="Custom"
+              characters="1M+"
+              description="Enterprise solutions"
+            />
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function FeatureCard({ icon, title, description }: any) {
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.05)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: '12px',
+      padding: '20px',
+      backdropFilter: 'blur(10px)',
+    }}>
+      <div style={{ fontSize: '32px', marginBottom: '10px' }}>{icon}</div>
+      <h4 style={{ margin: '0 0 8px' }}>{title}</h4>
+      <p style={{ margin: 0, opacity: 0.8, fontSize: '14px' }}>{description}</p>
+    </div>
+  );
+}
+
+function QuickActionButton({ href, label, description }: any) {
+  return (
+    <a
+      href={href}
+      style={{
+        background: 'rgba(255,255,255,0.1)',
+        border: '1px solid rgba(255,255,255,0.2)',
+        borderRadius: '8px',
+        padding: '15px 20px',
+        textDecoration: 'none',
+        color: 'white',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '5px',
+        flex: 1,
+        minWidth: '200px',
+        transition: 'all 0.2s',
+        cursor: 'pointer',
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.15)';
+        (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.4)';
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.1)';
+        (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.2)';
+      }}
+    >
+      <strong>{label}</strong>
+      <small style={{ opacity: 0.7 }}>{description}</small>
+    </a>
+  );
+}
+
+function PricingCard({ tier, price, characters, description }: any) {
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.05)',
+      border: '1px solid rgba(255,255,255,0.1)',
+      borderRadius: '12px',
+      padding: '20px',
+      backdropFilter: 'blur(10px)',
+    }}>
+      <h4 style={{ margin: '0 0 10px' }}>{tier}</h4>
+      <div style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '10px' }}>
+        {price}
+      </div>
+      <p style={{ margin: '0 0 10px', opacity: 0.8 }}>
+        <strong>{characters}</strong> characters/month
+      </p>
+      <p style={{ margin: 0, fontSize: '14px', opacity: 0.7 }}>{description}</p>
     </div>
   );
 }
