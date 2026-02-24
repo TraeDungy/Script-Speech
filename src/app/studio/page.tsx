@@ -923,6 +923,25 @@ export default function StudioPage() {
 
     async function hydrate() {
       try {
+        // Demo mode: skip database initialization if not available
+        const hasSupabaseConfig = !!(
+          process.env.NEXT_PUBLIC_SUPABASE_URL &&
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+        );
+
+        if (!hasSupabaseConfig) {
+          // Demo mode: set up default project
+          console.log("Studio running in demo mode");
+          updateMetadata({
+            projectId: "demo-project",
+            title: "Demo Script",
+            format: "feature",
+          });
+          setInitialization(null);
+          setSession(null);
+          return;
+        }
+
         const data = await initializeStudioSession();
         if (cancelled) {
           return;
@@ -945,7 +964,13 @@ export default function StudioPage() {
           applySlotMetadata((data.session.summary ?? data.session.slots ?? {}) as StudioSlotPayload);
         }
       } catch (error) {
-        console.error("Failed to hydrate studio project", error);
+        console.error("Failed to hydrate studio project, using demo mode", error);
+        // Fallback to demo mode
+        updateMetadata({
+          projectId: "demo-project",
+          title: "Demo Script",
+          format: "feature",
+        });
       }
     }
 
