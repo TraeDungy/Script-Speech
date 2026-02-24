@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@supabase/ssr';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null);
@@ -10,10 +10,7 @@ export default function DashboardPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-    );
+    const supabase = createClientComponentClient();
 
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) {
@@ -51,9 +48,22 @@ export default function DashboardPage() {
         padding: '20px',
         borderBottom: '1px solid rgba(255,255,255,0.1)',
       }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <h1 style={{ margin: 0 }}>Script-Speech</h1>
-          <p style={{ margin: '5px 0 0', opacity: 0.8 }}>Welcome, {user?.email}</p>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h1 style={{ margin: 0 }}>Script-Speech</h1>
+            <p style={{ margin: '5px 0 0', opacity: 0.8 }}>Welcome, {user?.email}</p>
+          </div>
+          <a href="/settings" style={{
+            padding: '10px 20px',
+            background: 'rgba(255,255,255,0.2)',
+            border: '1px solid rgba(255,255,255,0.3)',
+            borderRadius: '6px',
+            color: 'white',
+            textDecoration: 'none',
+            cursor: 'pointer',
+          }}>
+            ⚙️ Settings
+          </a>
         </div>
       </div>
 
