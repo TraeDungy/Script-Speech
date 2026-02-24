@@ -1,4 +1,31 @@
 // Client-side auth utilities
+import { createClient } from '@supabase/supabase-js';
+
+// Check if Supabase is configured in browser
+export function isBrowserSupabaseConfigured(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !!(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+}
+
+// Get Supabase browser client
+export function getSupabaseBrowserClient() {
+  if (!isBrowserSupabaseConfigured()) {
+    return null;
+  }
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
+}
+
+// Sync session cookie (no-op for now, will be implemented with Supabase)
+export async function syncSessionCookie() {
+  // TODO: Implement when Supabase credentials are available
+  return;
+}
 
 export async function logout() {
   // Demo mode cleanup

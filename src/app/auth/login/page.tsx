@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@supabase/supabase-js';
@@ -19,7 +19,7 @@ export default function LoginPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   );
 
-  React.useEffect(() => {
+  useEffect(() => {
     setDemoMode(!hasSupabaseConfig);
   }, [hasSupabaseConfig]);
 
