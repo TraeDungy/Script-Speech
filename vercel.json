@@ -6,12 +6,5 @@
   "env": {
     "NEXT_PUBLIC_API_URL": "https://script-speech.vercel.app"
   },
-  "regions": ["sfo1"],
-  "redirects": [
-    {
-      "source": "/",
-      "destination": "/pricing",
-      "permanent": false
-    }
-  ]
+  "regions": ["sfo1"]
 }
