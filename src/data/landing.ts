@@ -40,65 +40,65 @@ export type LandingContent = {
 
 export const landingContent: LandingContent = {
   hero: {
-    title: "The voice-led story studio for directors who think out loud.",
+    title: "Turn any script into studio-quality audio in minutes.",
     phrases: [
-      "Draft cinema-ready stories by speaking",
-      "Sketch acts, beats, and shots without friction",
-      "Deliver production files the same day",
+      "Paste your script. Choose your voice. Hit generate.",
+      "No gear. No studio. No voice actor invoices.",
+      "Broadcast-ready audio for podcasts, YouTube, audiobooks, and film.",
     ],
     description:
-      "Script Speech keeps the landing page focused on the mood: low light, confident lines, and zero clutter. Speak your vision and the canvas adapts without compromising precision.",
+      "Script Speech gives creators and agencies a professional voice studio in their browser. AI voices that sound like they cost five hundred dollars — without the invoice.",
   },
   vignettes: [
     {
-      title: "Voice directs the room",
+      title: "Built for volume",
       description:
-        "Speak the brief, calibrate tone, and watch the story spine assemble itself. Text is always there when you need to fine tune.",
+        "Batch your scripts and process entire seasons, chapters, or campaigns overnight. Wake up to finished files. No back-and-forth with a voice actor.",
       footnote: 1,
     },
     {
-      title: "Canvas stays in sync",
+      title: "Studio quality, browser simple",
       description:
-        "Outline, beat grid, and script view are rendered from one ScriptDoc core so every revision lands everywhere at once.",
+        "Every export is broadcast-ready: clean frequencies, consistent levels, zero room noise. MP3, WAV, and M4A available. Works anywhere your audience listens.",
       footnote: 2,
     },
     {
-      title: "References travel with you",
+      title: "Revise instantly",
       description:
-        "Boards, clips, and research snippets follow each scene and export with your package. Nothing gets stranded in a drive.",
+        "Change one word or rewrite the whole script — regeneration takes seconds. No retake fees, no waiting for studio availability, no version confusion.",
       footnote: 3,
     },
   ],
   cadence: [
     {
-      heading: "1. Tune the signal",
-      body: "A minimalist intake checks format, pacing, and references while your waveform shows the room is listening.",
+      heading: "1. Paste your script",
+      body: "Drop in your copy — narration, dialogue, ad read, chapter text. Any format, any length.",
       anchor: 1,
     },
     {
-      heading: "2. Move the pieces",
-      body: "Outline and beat editors adapt instantly to voice or keyboard adjustments so structure never lags behind.",
+      heading: "2. Choose your voice",
+      body: "Select from 24+ broadcast-quality AI voices. Conversational, documentary, audiobook, commercial. Preview before you commit.",
       anchor: 2,
     },
     {
-      heading: "3. Deliver with certainty",
-      body: "Queue exports, share secure links, and walk into your next session with production-ready files in hand.",
+      heading: "3. Export and publish",
+      body: "Download your finished audio file in seconds. Commercial license included. Ready for your DAW, your host, or your editor.",
       anchor: 4,
     },
   ],
   callToAction: {
-    eyebrow: "Early collaborator program",
-    title: "Help us tune Script Speech for productions that move fast.",
+    eyebrow: "Early access — first 50 users",
+    title: "Get in while pricing is at its lowest.",
     description:
-      "Founding teams receive guided onboarding, access to the redesigned studio canvas, and direct lines to the crew building the experience.",
+      "Script Speech is open to waitlist users first. Founding members lock in the lowest price this product will ever be — before the public launch.",
     primaryCta: {
-      label: "Preview the canvas",
+      label: "Open the studio",
       href: "/studio",
     },
     secondaryCta: {
-      label: "Study the system",
-      href: "/faq",
+      label: "See pricing",
+      href: "/pricing",
     },
-    helper: "Prefer a personal intro? Request access and we will respond within one business day.",
+    helper: "Questions? Hit reply on any email and we respond personally.",
   },
 };
