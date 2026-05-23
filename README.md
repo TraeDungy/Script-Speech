@@ -16,6 +16,8 @@ Voice-first scriptwriting assistant project. The repository now contains a Next.
    ```
 
 2. Visit `http://localhost:3000` to explore the voice-first landing experience (and `/studio` for the product shell).
+   - Need a shareable link for teammates? Once the dev server is running, start a tunnel (for example with `npx ngrok http 3000`)
+     and share the forwarded URL. The tunnel keeps the `/`, `/studio`, and `/admin/marketing` routes available for remote testing.
 3. Wire up optional backends (Supabase, Upstash Redis, OpenAI) using the guidance below, then consult [`docs/architecture.md`](docs/architecture.md) and [`docs/developer-handbook.md`](docs/developer-handbook.md) for deep dives.
 4. Need to share a live preview link? Follow [`docs/preview-and-testing.md`](docs/preview-and-testing.md) for tunnel instructions and common quality checks.
 
