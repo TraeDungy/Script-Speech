@@ -889,6 +889,7 @@ export default function StudioPage() {
   const metadata = useScriptDocStore((state) => state.doc.metadata);
   const loadDoc = useScriptDocStore((state) => state.loadDoc);
   const updateMetadata = useScriptDocStore((state) => state.updateMetadata);
+  const reorderScenes = useScriptDocStore((state) => state.reorderScenes);
   const scenes = useScriptDocStore(selectScenes);
   const characters = useScriptDocStore((state) => state.doc.characters);
   const [initialization, setInitialization] = useState<StudioInitializationPayload | null>(null);
@@ -935,12 +936,20 @@ export default function StudioPage() {
 
         if (data?.scriptDoc) {
           loadDoc(data.scriptDoc);
+          // Ensure the loaded doc carries a projectId; fall back to the session's.
+          if (!data.scriptDoc.metadata?.projectId?.trim() && data.session?.projectId) {
+            updateMetadata({ projectId: data.session.projectId });
+          }
         } else if (data?.project) {
           updateMetadata({
             projectId: data.project.id,
             title: data.project.title,
             format: data.project.scriptType,
           });
+        } else if (data?.session?.projectId) {
+          // No scriptDoc/project payload (error-fallback path) — still seed projectId
+          // so the voice client can connect and canvas updates can persist.
+          updateMetadata({ projectId: data.session.projectId });
         }
 
         setSession(data.session);
@@ -996,7 +1005,7 @@ export default function StudioPage() {
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur">
-          <SceneBreakdown scenes={scenes} characters={characters} />
+          <SceneBreakdown scenes={scenes} characters={characters} showReorder onReorder={reorderScenes} />
         </section>
 
         <section className="grid gap-10 md:grid-cols-[1.4fr_1fr]">

@@ -193,7 +193,7 @@ export class RealtimeClient {
   private readonly tokenEndpoint: string;
   private readonly iceServers?: RTCIceServer[];
   private readonly projectId?: string;
-  private readonly requestedSessionId?: string;
+  private requestedSessionId?: string;
 
   private session: RealtimeSession | null = null;
   private connection: RTCPeerConnection | null = null;
@@ -335,6 +335,51 @@ export class RealtimeClient {
         return;
       }
 
+      // Handle OpenAI Realtime *native* function calls. The API emits completed
+      // function calls as `response.output_item.done` with an item of
+      // type "function_call" (name + call_id + arguments JSON string). These are
+      // NOT the internal `tool.invocation` format parsed above, so bridge them
+      // into the same tool-invocation pipeline that populates the canvas.
+      if (typeof payload === "object" && payload !== null && "type" in payload) {
+        const msgType = (payload as { type?: unknown }).type;
+
+        if (msgType === "response.output_item.done") {
+          const item = (payload as { item?: unknown }).item;
+          if (
+            isPlainObject(item) &&
+            item.type === "function_call" &&
+            typeof item.name === "string" &&
+            typeof item.call_id === "string"
+          ) {
+            let parsedArgs: unknown = {};
+            if (typeof item.arguments === "string" && item.arguments.trim()) {
+              try {
+                parsedArgs = JSON.parse(item.arguments);
+              } catch {
+                parsedArgs = {};
+              }
+            }
+
+            const fnInvocation: ToolInvocationMessage = {
+              callId: item.call_id,
+              name: item.name,
+              arguments: parsedArgs,
+            };
+            if (this.sessionMetadata?.sessionId) {
+              fnInvocation.sessionId = this.sessionMetadata.sessionId;
+            }
+            if (this.sessionMetadata?.projectId) {
+              fnInvocation.projectId = this.sessionMetadata.projectId;
+            }
+
+            console.log("[Realtime] Native function call received:", fnInvocation);
+            this.events.emit({ type: "tool-invocation", invocation: fnInvocation });
+            void this.handleToolInvocation(fnInvocation);
+            return;
+          }
+        }
+      }
+
       // Handle incoming audio from OpenAI (response.audio.delta events)
       if (typeof payload === "object" && payload !== null && "type" in payload) {
         const msgType = payload.type;
@@ -460,7 +505,9 @@ export class RealtimeClient {
   attachRemoteAudioElement(element: HTMLMediaElement) {
     this.remoteAudioElement = element;
     this.remoteAudioElement.autoplay = true;
-    this.remoteAudioElement.playsInline = true;
+    // playsInline is a video-element property; set it defensively for elements
+    // that support it (harmless for <audio>) without tripping the media type.
+    (this.remoteAudioElement as Partial<HTMLVideoElement>).playsInline = true;
 
     if (this.remoteAudioStream) {
       this.remoteAudioElement.srcObject = this.remoteAudioStream;

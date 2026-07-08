@@ -150,7 +150,9 @@ async function persistSessionMetadataToSupabase(
   const { error } = await client.from(SESSION_TABLE).upsert(
     {
       session_id: input.sessionId,
-      project_id: input.projectId ?? null,
+      // `|| null` (not `??`) so an empty-string projectId becomes SQL NULL
+      // instead of "" — Postgres rejects "" for a uuid column.
+      project_id: input.projectId || null,
       ack_token: input.ackToken,
       expires_at: input.expiresAt ?? null,
       session_payload: input.rawSession ?? null,
@@ -315,7 +317,7 @@ async function persistTranscriptTurnToSupabase(client: SupabaseClient, turn: Tra
     {
       id: turn.id,
       session_id: turn.sessionId,
-      project_id: turn.projectId ?? null,
+      project_id: turn.projectId || null,
       role: turn.role,
       content: turn.text,
       final: turn.final,
@@ -422,7 +424,7 @@ async function persistProjectStatePatchToSupabase(
   const { error } = await client.from(SESSION_TABLE).upsert(
     {
       session_id: input.sessionId,
-      project_id: input.projectId ?? null,
+      project_id: input.projectId || null,
       last_state_patch: input.patch ?? null,
       state_patch_reason: input.reason ?? null,
       updated_at: now,
@@ -532,6 +534,7 @@ export async function fetchSessionMetadata(sessionId: string): Promise<StoredSes
 
 export async function persistTranscriptTurn(turn: TranscriptTurnDTO & { sessionId: string }): Promise<void> {
   const client = getClient();
+  const redis = getRedisClient();
 
   await executeWithFallback([
     async () => {
